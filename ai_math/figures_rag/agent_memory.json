@@ -1,0 +1,32 @@
+{
+  "17c1fc88": {
+    "question": "Hello, I am learning about web security",
+    "answer": "关于你的问题，我找到了以下信息：\n\n📌 Cross-Site Scripting XSS is a vulnerability that allows attackers to inject mali",
+    "timestamp": "2026-08-05 14:42:45"
+  },
+  "6406dc0b": {
+    "question": "What is XSS vulnerability and how to prevent it?",
+    "answer": "关于你的问题，我找到了以下信息：\n\n📌 Cross-Site Scripting XSS is a vulnerability that allows attackers to inject mali",
+    "timestamp": "2026-08-05 14:42:45"
+  },
+  "5d21e0f0": {
+    "question": "How does SQL injection work?",
+    "answer": "关于你的问题，我找到了以下信息：\n\n📌 SQL Injection occurs when attackers manipulate SQL queries through user input fi",
+    "timestamp": "2026-08-05 14:42:45"
+  },
+  "c3f0989b": {
+    "question": "Can you tell me about CSRF attack?",
+    "answer": "关于你的问题，我找到了以下信息：\n\n📌 Cross-Site Request Forgery CSRF forces authenticated users to execute unwanted a",
+    "timestamp": "2026-08-05 14:42:45"
+  },
+  "c9f99965": {
+    "question": "What is buffer overflow?",
+    "answer": "关于你的问题，我找到了以下信息：\n\n📌 Cross-Site Scripting XSS is a vulnerability that allows attackers to inject mali",
+    "timestamp": "2026-08-05 14:42:45"
+  },
+  "799f72da": {
+    "question": "Thanks for the information!",
+    "answer": "我没有找到关于「Thanks for the information!」的相关信息。你能换个方式描述吗？",
+    "timestamp": "2026-08-05 14:42:45"
+  }
+}

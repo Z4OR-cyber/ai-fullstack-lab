@@ -1,0 +1,61 @@
+# ============================================================
+# .dockerignore — 排除不需要的文件，加速构建 + 减小镜像体积
+# ============================================================
+
+# Git 版本控制
+.git
+.gitignore
+.gitattributes
+
+# Python 缓存与编译文件
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# 虚拟环境
+.venv/
+venv/
+env/
+
+# IDE 配置
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docker 自身文件
+Dockerfile
+.dockerignore
+docker-compose*.yml
+
+# CI/CD 配置
+.github/
+
+# 文档与测试（不需要进入生产镜像）
+docs/
+*.md
+tests/
+test_*.py
+*_test.py
+
+# 环境变量文件（敏感信息不能进入镜像！）
+.env
+.env.*
+!.env.example
+
+# 操作系统文件
+.DS_Store
+Thumbs.db
+
+# 日志文件
+*.log
+logs/
