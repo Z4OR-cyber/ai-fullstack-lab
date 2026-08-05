@@ -236,7 +236,7 @@
 |---|------|---------|---------|
 | 8 | 端到端 RAG 系统 — LangChain/LlamaIndex | Document Loader → Splitter → Embedding → VectorStore → Retriever → QA Chain → Source Citation | 构建「Bug Bounty 知识库问答机器人」，输入漏洞类型自动检索知识库生成答案+引用来源 |
 | 9 | RAG 评估与优化 — RAGAS 指标体系 | Faithfulness/Answer Relevancy/Context Precision/Context Recall、chunk overlap 调优、Top-K 选择 | 对 RAG 系统做量化评估，输出评估报告，迭代优化参数 |
-| 10 | Agent + RAG 融合 — 知识增强 Agent | Agent Tool 化 RAG（把检索作为 Tool 供 Agent 调用）、多轮对话中的上下文管理、长期记忆持久化 | 给编程小悟添加知识库检索能力：用户提问→Agent 判断是否需要检索→调用 RAG→整合回答 |
+| 10 | Agent + RAG 融合 — 知识增强 Agent | Agent Tool 化 RAG（把检索作为 Tool 供 Agent 调用）、多轮对话中的上下文管理、长期记忆持久化 | 给添加知识库检索能力：用户提问→Agent 判断是否需要检索→调用 RAG→整合回答 |
 
 ### 环境需求
 - Python 3.14+（已具备 ✅）
