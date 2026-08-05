@@ -1,0 +1,268 @@
+# ============================================================
+# 第4题：Kubernetes 部署 — 应用上 K8s
+# 包含：Deployment + Service + ConfigMap + Secret + Ingress + HPA
+# 命名空间：todo-app
+# ============================================================
+---
+# ==================== 命名空间 ====================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: todo-app
+  labels:
+    name: todo-app
+
+---
+# ==================== ConfigMap（非敏感配置）====================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: todo-app-config
+  namespace: todo-app
+  labels:
+    app: todo-app
+data:
+  # 应用配置（非敏感信息）
+  APP_ENV: "production"
+  APP_PORT: "8000"
+  LOG_LEVEL: "info"
+  DATABASE_HOST: "todo-db-service"
+  DATABASE_PORT: "5432"
+  DATABASE_NAME: "todo_db"
+  REDIS_HOST: "todo-redis-service"
+  REDIS_PORT: "6379"
+
+---
+# ==================== Secret（敏感配置）====================
+# 注意：这里用 base64 编码（不是加密！）
+# 生产环境应使用 Sealed Secrets 或 External Secrets Operator
+apiVersion: v1
+kind: Secret
+metadata:
+  name: todo-app-secret
+  namespace: todo-app
+  labels:
+    app: todo-app
+type: Opaque
+# base64 编码的值（echo -n 'value' | base64）
+stringData:
+  # 使用 stringData 而非 data，可以直接写明文（K8s 会自动编码）
+  DATABASE_USER: "todo_user"
+  DATABASE_PASSWORD: "change_me_in_production"
+  SECRET_KEY: "generate_a_real_secret_key_here"
+
+---
+# ==================== Deployment ====================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: todo-app
+  namespace: todo-app
+  labels:
+    app: todo-app
+    version: v1.0.0
+spec:
+  # 副本数（HPA 会动态调整，这里设初始值）
+  replicas: 3
+  selector:
+    matchLabels:
+      app: todo-app
+  # 滚动更新策略
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1          # 滚动更新时，最多比期望副本数多 1 个
+      maxUnavailable: 0    # 滚动更新时，不允许有不可用副本
+  # 历史版本保留数（用于回滚）
+  revisionHistoryLimit: 10
+  template:
+    metadata:
+      labels:
+        app: todo-app
+        version: v1.0.0
+    spec:
+      containers:
+        - name: todo-app
+          image: todo-app:1.0.0  # 替换为实际镜像地址
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+              name: http
+              protocol: TCP
+          # 从 ConfigMap 注入环境变量
+          envFrom:
+            - configMapRef:
+                name: todo-app-config
+            - secretRef:
+                name: todo-app-secret
+          # 资源限制（requests 是调度依据，limits 是硬上限）
+          resources:
+            requests:
+              cpu: "100m"      # 0.1 核 CPU
+              memory: "128Mi"
+            limits:
+              cpu: "500m"      # 0.5 核 CPU
+              memory: "256Mi"
+          # 就绪探针：容器是否准备好接收流量
+          # 失败时从 Service 的 Endpoints 中移除该 Pod
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 3
+          # 存活探针：容器是否存活
+          # 失败时 K8s 会重启该 Pod
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15    # 等应用完全启动
+            periodSeconds: 20
+            failureThreshold: 3
+            timeoutSeconds: 3
+          # 启动探针：容器是否已启动（启动期间禁用 liveness/readiness）
+          # 适合启动较慢的应用
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 0
+            periodSeconds: 5
+            failureThreshold: 12  # 最多等 60 秒启动
+          # 优雅终止等待时间
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "5"]  # 等待负载均衡器移除该 Pod
+
+      # 优雅终止宽限期（默认 30 秒）
+      terminationGracePeriodSeconds: 30
+
+---
+# ==================== Service (ClusterIP) ====================
+# 集群内部访问的稳定网络端点
+apiVersion: v1
+kind: Service
+metadata:
+  name: todo-app-service
+  namespace: todo-app
+  labels:
+    app: todo-app
+spec:
+  type: ClusterIP
+  selector:
+    app: todo-app
+  ports:
+    - name: http
+      port: 80          # Service 暴露的端口
+      targetPort: 8000  # 容器端口
+      protocol: TCP
+
+---
+# ==================== Service (NodePort) ====================
+# 对外暴露端口（调试用，生产环境推荐用 Ingress）
+apiVersion: v1
+kind: Service
+metadata:
+  name: todo-app-nodeport
+  namespace: todo-app
+  labels:
+    app: todo-app
+spec:
+  type: NodePort
+  selector:
+    app: todo-app
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8000
+      nodePort: 30080  # 节点端口（30000-32767 范围）
+
+---
+# ==================== Ingress ====================
+# 通过域名 + 路径路由到 Service，支持 TLS
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: todo-app-ingress
+  namespace: todo-app
+  labels:
+    app: todo-app
+  annotations:
+    # 使用 nginx ingress controller
+    kubernetes.io/ingress.class: nginx
+    # 启用 TLS 重定向（HTTP → HTTPS）
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # 限流：每秒 10 个请求
+    nginx.ingress.kubernetes.io/limit-rps: "10"
+    # 上传文件大小限制
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+spec:
+  tls:
+    - hosts:
+        - todo-app.example.com
+      secretName: todo-app-tls  # TLS 证书 Secret
+  rules:
+    - host: todo-app.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: todo-app-service
+                port:
+                  number: 80
+
+---
+# ==================== HorizontalPodAutoscaler ====================
+# 根据 CPU 使用率自动扩缩容
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: todo-app-hpa
+  namespace: todo-app
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: todo-app
+  # 最小/最大副本数
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    # 基于 CPU 使用率扩缩容
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70  # CPU 使用率超过 70% 时扩容
+    # 基于内存使用率扩缩容
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80  # 内存使用率超过 80% 时扩容
+  # 扩缩容行为策略
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300  # 缩容冷却 5 分钟
+      policies:
+        - type: Percent
+          value: 50           # 每次最多缩 50% 的副本
+          periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 0   # 扩容无需冷却
+      policies:
+        - type: Percent
+          value: 100          # 每次最多扩 100%
+          periodSeconds: 15
+        - type: Pods
+          value: 4            # 或每次最多扩 4 个 Pod
+          periodSeconds: 15
+      selectPolicy: Max       # 取两个策略中的最大值

@@ -1,0 +1,98 @@
+# ============================================================
+# 第5题：Prometheus 告警规则
+# 功能：当指标超过阈值时触发告警
+# ============================================================
+
+groups:
+  # -------------------- 应用告警 --------------------
+  - name: todo-app-alerts
+    rules:
+      # 告警1：服务不可用
+      - alert: TodoAppDown
+        expr: up{job="todo-app"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: todo-app
+        annotations:
+          summary: "Todo App 服务不可用"
+          description: "实例 {{ $labels.instance }} 已经离线超过 1 分钟。"
+
+      # 告警2：高错误率
+      - alert: TodoAppHighErrorRate
+        # 过去 5 分钟内，5xx 错误占总请求的比例超过 5%
+        expr: |
+          sum(rate(http_requests_total{job="todo-app", status=~"5.."}[5m]))
+          /
+          sum(rate(http_requests_total{job="todo-app"}[5m]))
+          > 0.05
+        for: 2m
+        labels:
+          severity: warning
+          service: todo-app
+        annotations:
+          summary: "Todo App 错误率过高"
+          description: "过去 2 分钟内，5xx 错误率超过 5%（当前值：{{ $value | humanizePercentage }}）。"
+
+      # 告警3：高延迟
+      - alert: TodoAppHighLatency
+        # 95 分位延迟超过 1 秒
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(http_request_duration_seconds_bucket{job="todo-app"}[5m])) by (le)
+          ) > 1.0
+        for: 5m
+        labels:
+          severity: warning
+          service: todo-app
+        annotations:
+          summary: "Todo App 延迟过高"
+          description: "P95 延迟超过 1 秒，当前值：{{ $value }}s。"
+
+      # 告警4：待办事项积压
+      - alert: TodoItemsBacklog
+        # 未完成待办事项超过 1000
+        expr: todo_items_total{status="pending"} > 1000
+        for: 10m
+        labels:
+          severity: info
+          service: todo-app
+        annotations:
+          summary: "待办事项积压"
+          description: "未完成待办事项超过 1000 个（当前值：{{ $value }}），请检查处理逻辑。"
+
+  # -------------------- 主机告警 --------------------
+  - name: host-alerts
+    rules:
+      # 告警5：高 CPU 使用率
+      - alert: HighCpuUsage
+        expr: |
+          100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CPU 使用率过高"
+          description: "主机 {{ $labels.instance }} 的 CPU 使用率超过 80%（当前值：{{ $value }}%）。"
+
+      # 告警6：高内存使用率
+      - alert: HighMemoryUsage
+        expr: |
+          (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "内存使用率过高"
+          description: "主机 {{ $labels.instance }} 的内存使用率超过 85%（当前值：{{ $value }}%）。"
+
+      # 告警7：磁盘空间不足
+      - alert: DiskSpaceLow
+        expr: |
+          (1 - (node_filesystem_avail_bytes / node_filesystem_size_bytes)) * 100 > 85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "磁盘空间不足"
+          description: "主机 {{ $labels.instance }} 的磁盘使用率超过 85%（当前值：{{ $value }}%）。"

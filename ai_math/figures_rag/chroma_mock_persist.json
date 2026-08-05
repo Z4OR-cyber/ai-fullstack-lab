@@ -1,0 +1,57 @@
+{
+  "name": "knowledge_base",
+  "documents": [
+    "SQL injection vulnerability allows attackers to execute malicious SQL queries",
+    "Cross site scripting XSS injects malicious scripts into web pages viewed by users",
+    "Buffer overflow occurs when a program writes more data to a buffer than it can hold",
+    "Authentication bypass vulnerability allows unauthorized access to systems",
+    "Remote code execution RCE allows attackers to run arbitrary code on a server",
+    "Cross site request forgery CSRF tricks users into performing unwanted actions",
+    "Directory traversal vulnerability allows access to files outside the web root",
+    "Insecure deserialization can lead to remote code execution attacks"
+  ],
+  "metadatas": [
+    {
+      "category": "injection",
+      "severity": "high"
+    },
+    {
+      "category": "xss",
+      "severity": "medium"
+    },
+    {
+      "category": "memory",
+      "severity": "high"
+    },
+    {
+      "category": "auth",
+      "severity": "critical"
+    },
+    {
+      "category": "rce",
+      "severity": "critical"
+    },
+    {
+      "category": "csrf",
+      "severity": "medium"
+    },
+    {
+      "category": "traversal",
+      "severity": "high"
+    },
+    {
+      "category": "deserialization",
+      "severity": "critical"
+    }
+  ],
+  "ids": [
+    "doc_0",
+    "doc_1",
+    "doc_2",
+    "doc_3",
+    "doc_4",
+    "doc_5",
+    "doc_6",
+    "doc_7"
+  ]
+}
