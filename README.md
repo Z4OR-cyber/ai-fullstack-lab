@@ -43,11 +43,14 @@ ai-fullstack-lab/
 │   ├── ai-image-studio/                # 多引擎AI图片生成
 │   ├── ai-tech-briefing/               # AI科技简报
 │   ├── ai-tech-briefing-generator/     # 简报生成器
+│   ├── bug-bounty-knowledge-base/      # Bug Bounty知识库
+│   ├── bug-bounty-recon-workflow/      # Recon自动化工作流
 │   ├── card-game-design-pipeline/      # 卡牌游戏设计流水线
 │   ├── card-game-dev-pipeline/         # 卡牌游戏开发流水线
 │   ├── content-atomizer/               # 内容知识原子化
 │   ├── kimi-k3-coder/                  # Kimi K3编码助手
 │   ├── medflow-spaced-repetition/      # 间隔重复学习系统
+│   ├── rag-exercise-collection/        # RAG检索增强生成练习集
 │   ├── token-optimization-engine/      # Token优化策略
 │   ├── video-automation-toolkit/       # 视频自动化剪辑
 │   └── wechat-article-reader/          # 微信公众号文章阅读器
