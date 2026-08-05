@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SecScan — AI 代码安全审计平台</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <!-- Chart.js CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+  <!-- ============ Header ============ -->
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="logo">
+        <span class="logo-icon">🛡️</span>
+        <span class="logo-text">SecScan</span>
+        <span class="logo-sub">AI 代码安全审计平台</span>
+      </div>
+      <nav class="header-nav">
+        <a href="https://docs.coze.cn" target="_blank" rel="noopener">文档</a>
+        <a href="/docs" target="_blank" rel="noopener">API</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="container">
+
+    <!-- ============ Upload Section ============ -->
+    <section id="upload-section" class="card upload-card">
+      <h2 class="section-title">提交代码扫描</h2>
+      <p class="section-desc">支持 Python (.py) 和 JavaScript (.js) 文件，通过拖拽上传或直接粘贴代码进行安全审计。</p>
+
+      <!-- Tab switcher -->
+      <div class="tab-switcher">
+        <button class="tab-btn active" data-tab="file">📁 文件上传</button>
+        <button class="tab-btn" data-tab="paste">📋 代码粘贴</button>
+      </div>
+
+      <!-- File upload tab -->
+      <div id="tab-file" class="tab-panel active">
+        <div id="drop-zone" class="drop-zone">
+          <div class="drop-zone-content">
+            <div class="drop-icon">📂</div>
+            <p class="drop-text">拖拽文件到此处，或<span class="browse-link">点击选择文件</span></p>
+            <p class="drop-hint">支持 .py / .js / .mjs 文件，最大 5 MB</p>
+          </div>
+          <input type="file" id="file-input" accept=".py,.js,.mjs" hidden>
+        </div>
+      </div>
+
+      <!-- Text paste tab -->
+      <div id="tab-paste" class="tab-panel">
+        <div class="paste-area">
+          <input type="text" id="paste-filename" class="paste-filename" placeholder="文件名（如 test.py）" value="pasted_code.py">
+          <textarea id="paste-textarea" class="paste-textarea" placeholder="在此粘贴代码..." rows="12"></textarea>
+        </div>
+      </div>
+
+      <!-- Scan button -->
+      <div class="upload-actions">
+        <button id="scan-btn" class="btn btn-primary" disabled>
+          <span class="btn-text">开始安全扫描</span>
+          <span class="btn-loading hidden">扫描中...</span>
+        </button>
+      </div>
+
+      <!-- Error message -->
+      <div id="error-msg" class="error-msg hidden"></div>
+    </section>
+
+    <!-- ============ Loading ============ -->
+    <div id="loading-section" class="hidden">
+      <div class="loading-spinner">
+        <div class="spinner"></div>
+        <p>正在分析代码安全性...</p>
+      </div>
+    </div>
+
+    <!-- ============ Results Section ============ -->
+    <section id="results-section" class="hidden">
+
+      <!-- Summary cards -->
+      <div class="summary-cards">
+        <div class="summary-card total">
+          <div class="card-value" id="summary-total">0</div>
+          <div class="card-label">漏洞总数</div>
+        </div>
+        <div class="summary-card critical">
+          <div class="card-value" id="summary-critical">0</div>
+          <div class="card-label">严重</div>
+        </div>
+        <div class="summary-card high">
+          <div class="card-value" id="summary-high">0</div>
+          <div class="card-label">高危</div>
+        </div>
+        <div class="summary-card medium">
+          <div class="card-value" id="summary-medium">0</div>
+          <div class="card-label">中危</div>
+        </div>
+        <div class="summary-card low">
+          <div class="card-value" id="summary-low">0</div>
+          <div class="card-label">低危</div>
+        </div>
+        <div class="summary-card info">
+          <div class="card-value" id="summary-info">0</div>
+          <div class="card-label">信息</div>
+        </div>
+      </div>
+
+      <!-- Chart + meta -->
+      <div class="results-grid">
+        <div class="card chart-card">
+          <h3 class="card-title">严重程度分布</h3>
+          <div class="chart-wrapper">
+            <canvas id="severity-chart"></canvas>
+          </div>
+        </div>
+
+        <div class="card meta-card">
+          <h3 class="card-title">扫描信息</h3>
+          <div class="meta-list">
+            <div class="meta-row"><span class="meta-key">文件名</span><span class="meta-val" id="meta-filename">—</span></div>
+            <div class="meta-row"><span class="meta-key">语言</span><span class="meta-val" id="meta-language">—</span></div>
+            <div class="meta-row"><span class="meta-key">扫描时间</span><span class="meta-val" id="meta-scan-time">—</span></div>
+            <div class="meta-row"><span class="meta-key">扫描ID</span><span class="meta-val mono" id="meta-scan-id">—</span></div>
+          </div>
+          <button id="export-btn" class="btn btn-secondary">
+            <span>⬇️ 导出 JSON 报告</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Vulnerability list -->
+      <div class="card vuln-list-card">
+        <h3 class="card-title">漏洞详情列表</h3>
+        <div id="vuln-list" class="vuln-list"></div>
+      </div>
+
+      <!-- Rescan button -->
+      <div class="rescan-area">
+        <button id="rescan-btn" class="btn btn-outline">🔄 重新扫描</button>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="site-footer">
+    <p>SecScan v1.0.0 — AI 驱动的代码安全审计平台</p>
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

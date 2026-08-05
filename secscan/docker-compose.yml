@@ -1,0 +1,104 @@
+# ============================================================
+# SecScan Docker Compose — 多服务编排
+# 服务：SecScan 应用 + PostgreSQL + ChromaDB
+# 网络：frontend（对外）+ backend（内部通信）双网络隔离
+# 持久化：命名数据卷挂载
+# ============================================================
+
+services:
+  # -------------------- SecScan 应用 --------------------
+  secscan-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: secscan-app
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+      - SECRET_KEY=${SECRET_KEY:-default_secret_change_me}
+      - DEBUG=${DEBUG:-false}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - CORS_ORIGINS=${CORS_ORIGINS:-*}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      chromadb:
+        condition: service_healthy
+    networks:
+      - frontend
+      - backend
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # -------------------- PostgreSQL 数据库 --------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: secscan-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-secscan}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me}
+      POSTGRES_DB: ${POSTGRES_DB:-secscan_db}
+    volumes:
+      # 数据持久化：将数据存储在命名卷中，容器删除后数据不丢失
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - backend
+    restart: unless-stopped
+    healthcheck:
+      # pg_isready 是 PostgreSQL 自带的健康检查工具
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-secscan} -d ${POSTGRES_DB:-secscan_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # -------------------- ChromaDB 向量数据库 --------------------
+  # ChromaDB 用于存储代码嵌入向量，支持 AI 语义检索
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: secscan-chromadb
+    environment:
+      - IS_PERSISTENT=true
+      - ANONYMIZED_TELEMETRY=false
+      - PERSIST_DIRECTORY=/chroma/chroma
+    volumes:
+      # 向量数据持久化
+      - chroma-data:/chroma/chroma
+    networks:
+      - backend
+    restart: unless-stopped
+    healthcheck:
+      # ChromaDB 暴露 /api/v1/heartbeat 健康检查端点
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/api/v1/heartbeat || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+# -------------------- 数据卷 --------------------
+volumes:
+  postgres-data:
+    driver: local
+  chroma-data:
+    driver: local
+
+# -------------------- 网络（双网络隔离）--------------------
+networks:
+  # frontend 网络：对外暴露，仅 secscan-app 加入
+  # 外部流量通过此网络访问应用
+  frontend:
+    driver: bridge
+  # backend 网络：内部通信，postgres + chromadb 仅在此网络
+  # 数据库不对外暴露，提升安全性
+  backend:
+    driver: bridge
+    internal: true

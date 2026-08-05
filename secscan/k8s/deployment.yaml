@@ -1,0 +1,295 @@
+# ============================================================
+# SecScan Kubernetes 部署清单
+# 包含 8 个资源：Namespace + ConfigMap + Secret + Deployment
+#                + Service + Ingress + HPA + PodDisruptionBudget
+# 命名空间：secscan
+# 镜像来源：GHCR (ghcr.io/<org>/secscan)
+# ============================================================
+
+---
+# ==================== 命名空间 ====================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: secscan
+  labels:
+    name: secscan
+    app.kubernetes.io/name: secscan
+    app.kubernetes.io/part-of: secscan-platform
+
+---
+# ==================== ConfigMap（非敏感配置）====================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: secscan-config
+  namespace: secscan
+  labels:
+    app: secscan
+    app.kubernetes.io/name: secscan
+data:
+  # 应用运行配置（非敏感信息）
+  APP_ENV: "production"
+  APP_PORT: "8000"
+  LOG_LEVEL: "info"
+  # PostgreSQL 连接配置
+  DATABASE_HOST: "postgres.secscan.svc.cluster.local"
+  DATABASE_PORT: "5432"
+  DATABASE_NAME: "secscan_db"
+  # ChromaDB 向量数据库配置
+  CHROMA_HOST: "chromadb.secscan.svc.cluster.local"
+  CHROMA_PORT: "8000"
+  # CORS 跨域配置
+  CORS_ORIGINS: "https://secscan.example.com"
+
+---
+# ==================== Secret（敏感配置）====================
+# 注意：这里用 stringData 直接写明文（K8s 会自动 base64 编码）
+# 生产环境应使用 Sealed Secrets 或 External Secrets Operator
+apiVersion: v1
+kind: Secret
+metadata:
+  name: secscan-secret
+  namespace: secscan
+  labels:
+    app: secscan
+    app.kubernetes.io/name: secscan
+type: Opaque
+stringData:
+  DATABASE_USER: "secscan"
+  DATABASE_PASSWORD: "change_me_in_production"
+  DATABASE_URL: "postgresql://secscan:change_me_in_production@postgres.secscan.svc.cluster.local:5432/secscan_db"
+  SECRET_KEY: "generate_a_real_secret_key_here"
+
+---
+# ==================== Deployment ====================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: secscan
+  namespace: secscan
+  labels:
+    app: secscan
+    version: v1.0.0
+    app.kubernetes.io/name: secscan
+spec:
+  # 初始副本数（HPA 会根据负载动态调整）
+  replicas: 2
+  selector:
+    matchLabels:
+      app: secscan
+  # 滚动更新策略
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1          # 滚动更新时，最多比期望副本数多 1 个
+      maxUnavailable: 0    # 滚动更新时，不允许有不可用副本（零停机部署）
+  # 历史版本保留数（用于回滚）
+  revisionHistoryLimit: 10
+  template:
+    metadata:
+      labels:
+        app: secscan
+        version: v1.0.0
+      annotations:
+        # prometheus 监控注解
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+        - name: secscan
+          # 镜像地址（替换 <github-org> 为实际组织名）
+          image: ghcr.io/github-org/secscan:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8000
+              name: http
+              protocol: TCP
+          # 从 ConfigMap 和 Secret 注入环境变量
+          envFrom:
+            - configMapRef:
+                name: secscan-config
+            - secretRef:
+                name: secscan-secret
+          # 资源限制（requests 是调度依据，limits 是硬上限）
+          resources:
+            requests:
+              cpu: "250m"      # 0.25 核 CPU（调度最低保障）
+              memory: "256Mi"
+            limits:
+              cpu: "500m"      # 0.5 核 CPU（最大可用）
+              memory: "512Mi"
+          # -------------------- 启动探针 --------------------
+          # 启动探针：容器是否已启动（启动期间禁用 liveness/readiness）
+          # 适合启动较慢的应用，避免启动期间被误杀
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 0
+            periodSeconds: 5
+            failureThreshold: 12  # 最多等待 60 秒启动
+            timeoutSeconds: 3
+          # -------------------- 就绪探针 --------------------
+          # 就绪探针：容器是否准备好接收流量
+          # 失败时从 Service 的 Endpoints 中移除该 Pod
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 3
+          # -------------------- 存活探针 --------------------
+          # 存活探针：容器是否存活
+          # 失败时 K8s 会重启该 Pod
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15    # 等应用完全启动后再开始检查
+            periodSeconds: 20
+            failureThreshold: 3
+            timeoutSeconds: 3
+          # 优雅终止钩子
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "5"]  # 等待负载均衡器移除该 Pod
+
+      # 优雅终止宽限期（默认 30 秒）
+      terminationGracePeriodSeconds: 30
+
+---
+# ==================== Service (ClusterIP) ====================
+# 集群内部访问的稳定网络端点
+apiVersion: v1
+kind: Service
+metadata:
+  name: secscan
+  namespace: secscan
+  labels:
+    app: secscan
+    app.kubernetes.io/name: secscan
+spec:
+  type: ClusterIP
+  selector:
+    app: secscan
+  ports:
+    - name: http
+      port: 80          # Service 暴露的端口
+      targetPort: 8000  # 容器端口
+      protocol: TCP
+
+---
+# ==================== Ingress ====================
+# 通过域名 + 路径路由到 Service，支持 TLS 终止
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: secscan-ingress
+  namespace: secscan
+  labels:
+    app: secscan
+    app.kubernetes.io/name: secscan
+  annotations:
+    # 使用 nginx ingress controller
+    kubernetes.io/ingress.class: nginx
+    # 启用 TLS 重定向（HTTP → HTTPS）
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # 限流：每秒 10 个请求
+    nginx.ingress.kubernetes.io/limit-rps: "10"
+    # 上传文件大小限制（代码文件扫描需要）
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    # 连接超时
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "30"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+spec:
+  tls:
+    - hosts:
+        - secscan.example.com
+      secretName: secscan-tls  # TLS 证书 Secret（需提前创建）
+  rules:
+    - host: secscan.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: secscan
+                port:
+                  number: 80
+
+---
+# ==================== HorizontalPodAutoscaler ====================
+# 根据 CPU 使用率自动扩缩容
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: secscan-hpa
+  namespace: secscan
+  labels:
+    app: secscan
+    app.kubernetes.io/name: secscan
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: secscan
+  # 最小/最大副本数
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    # 基于 CPU 使用率扩缩容（超过 70% 自动扩容）
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    # 基于内存使用率扩缩容（超过 80% 自动扩容）
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+  # 扩缩容行为策略
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300  # 缩容冷却 5 分钟，避免抖动
+      policies:
+        - type: Percent
+          value: 50           # 每次最多缩 50% 的副本
+          periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 0   # 扩容无需冷却，快速响应
+      policies:
+        - type: Percent
+          value: 100          # 每次最多扩 100%
+          periodSeconds: 15
+        - type: Pods
+          value: 4            # 或每次最多扩 4 个 Pod
+          periodSeconds: 15
+      selectPolicy: Max       # 取两个策略中的最大值
+
+---
+# ==================== PodDisruptionBudget ====================
+# 保证自愿驱逐（如节点维护）时至少保留 1 个可用 Pod
+# 防止滚动更新或节点排空导致服务完全不可用
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: secscan-pdb
+  namespace: secscan
+  labels:
+    app: secscan
+    app.kubernetes.io/name: secscan
+spec:
+  minAvailable: 1  # 至少保持 1 个 Pod 可用
+  selector:
+    matchLabels:
+      app: secscan
