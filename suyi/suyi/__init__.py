@@ -34,7 +34,7 @@ Quick start:
     result = await agent.run("Do something")
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 # Memory
 from .memory import MemoryManager, MemoryLifecycle
@@ -196,6 +196,13 @@ __all__ = [
     "load_config_from_dict",
     "get_default_config",
     "save_config",
+    # Phase 6: Web API, Persistence, Streaming
+    "SessionManager",
+    "SessionData",
+    "StreamHandler",
+    "StreamChunk",
+    "StreamCallbacks",
+    "SuyiServer",
 ]
 
 # Phase 2: Skills
@@ -281,3 +288,15 @@ from .config import (
     get_default_config,
     save_config,
 )
+
+# Phase 6: Web API, Persistence, Streaming
+from .persistence import (
+    SessionManager,
+    SessionData,
+)
+from .streaming import (
+    StreamHandler,
+    StreamChunk,
+    StreamCallbacks,
+)
+from .web import SuyiServer

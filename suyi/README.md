@@ -1,0 +1,493 @@
+# Suyi（溯忆）— 自进化 AI Agent 框架
+
+> **溯忆** — 追溯过往，构建记忆，自我进化。
+
+Suyi 是一个纯 Python 实现的自进化 AI Agent 框架，不依赖 PyTorch / TensorFlow / OpenAI SDK。
+核心依赖仅为 `httpx` + `numpy`，设计目标是在保持极简依赖的同时提供生产级的 Agent 能力。
+
+## 核心特性
+
+| 模块 | 说明 |
+|------|------|
+| **Memory** | 三层记忆系统 — 工作记忆 / 情景记忆 / 语义记忆，支持 TF-IDF 检索与生命周期遗忘 |
+| **Core** | ReAct 循环 + 四层上下文组装 + 三维预算管理（轮次 / Token / 时间） |
+| **Tools** | 工具基类 + 权限分级（auto / confirm / block）+ 内置工具（Bash / 读写文件 / 搜索） |
+| **Skills** | 渐进式披露技能系统 — 菜单 → 加载 → 执行，YAML front-matter + 安全扫描 |
+| **Middleware** | 可插拔中间件链 — 压缩 / 记忆注入 / 循环检测 / 澄清 |
+| **Multi-Agent** | AgentInstance + OrchestratorAgent + 三种协作模式（Pipeline / Blackboard / Voting） |
+| **Evolution** | 自进化引擎 — 行为学习 / 技能自动生成 / 性能评估 / 反馈收集 |
+
+**扩展模块（v0.2.0 新增）：**
+
+| 模块 | 说明 |
+|------|------|
+| **LLM Adapters** | OpenAI / Anthropic 适配器，纯 httpx 实现，支持流式输出 |
+| **Config** | 类型安全配置系统，支持 YAML / JSON / dict 加载 |
+| **CLI** | 交互式 REPL，支持 Mock 模式与多提供商切换 |
+| **Web API** | 标准库 HTTP 服务器（不依赖 Flask / FastAPI），支持 CORS |
+| **Persistence** | JSON 文件会话持久化，支持创建 / 保存 / 加载 / 列出 / 导出 |
+| **Streaming** | 异步流式输出处理器，支持逐 token 输出与工具调用中断 |
+
+## 架构总览
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        用户 / CLI / Web API                   │
+├─────────────────────────────────────────────────────────────┤
+│                     Middleware Chain                         │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐    │
+│  │ 压缩中间件 │→│ 记忆注入  │→│ 循环检测  │→│ 澄清中间件 │    │
+│  └──────────┘  └──────────┘  └──────────┘  └──────────┘    │
+├─────────────────────────────────────────────────────────────┤
+│                      Agent Loop (ReAct)                      │
+│  ┌─────────┐   ┌───────────┐   ┌─────────┐   ┌──────────┐  │
+│  │ 预算检查  │→│ 上下文组装  │→│ LLM 调用 │→│ 工具执行  │  │
+│  └─────────┘   └───────────┘   └─────────┘   └──────────┘  │
+├───────────┬─────────────┬──────────────┬────────────────────┤
+│  Memory   │   Tools     │   Skills     │   Multi-Agent      │
+│ ┌────────┐│ ┌─────────┐│ ┌──────────┐ │ ┌────────────────┐ │
+│ │Working ││ │BashTool ││ │Loader    │ │ │Orchestrator    │ │
+│ │Episodic││ │ReadFile ││ │Menu      │ │ │SubAgentManager │ │
+│ │Semantic││ │WriteFile││ │Scanner   │ │ │Pipeline        │ │
+│ └────────┘│ │Search   ││ └──────────┘ │ │Blackboard      │ │
+│           │ │SkillTool││              │ │Voting          │ │
+│           │ └─────────┘│              │ └────────────────┘ │
+├───────────┴─────────────┴──────────────┴────────────────────┤
+│                      Evolution Engine                        │
+│  ┌──────────┐  ┌──────────────┐  ┌───────────┐             │
+│  │ Learner  │→│ SkillGenerator│→│ Evaluator │             │
+│  └──────────┘  └──────────────┘  └───────────┘             │
+│         ↑                                           ↑       │
+│  ┌──────┴──────┐                          ┌──────────┴────┐ │
+│  │FeedbackCollector│                      │InteractionLog │ │
+│  └───────────────┘                       └───────────────┘ │
+├─────────────────────────────────────────────────────────────┤
+│              LLM Adapters (httpx)                            │
+│  ┌──────────────┐    ┌──────────────────┐                   │
+│  │ OpenAIAdapter│    │ AnthropicAdapter │                   │
+│  │ (DeepSeek等) │    │ (Claude)         │                   │
+│  └──────────────┘    └──────────────────┘                   │
+├─────────────────────────────────────────────────────────────┤
+│        Persistence (JSON)  │  Streaming (async gen)         │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## 快速开始
+
+### 安装
+
+```bash
+# 从源码安装
+git clone https://github.com/your-org/suyi.git
+cd suyi
+pip install -e .
+
+# 或直接安装依赖
+pip install httpx numpy
+```
+
+### CLI 交互模式
+
+```bash
+# Mock 模式（无需 API key，推荐首次体验）
+suyi --mock
+
+# 指定 LLM 提供商
+suyi --provider openai --model gpt-4o
+
+# 指定技能库目录
+suyi --mock --skills-dir ./my_skills
+```
+
+### 配置文件
+
+创建 `config.yaml`：
+
+```yaml
+llm:
+  provider: openai
+  api_key: sk-your-key-here
+  model: gpt-4o
+  temperature: 0.7
+  max_tokens: 4096
+
+memory:
+  token_budget: 8192
+  storage_dir: ./data/memory
+
+tools:
+  enable_bash: true
+  enable_file_ops: true
+
+middleware:
+  enable_summarization: true
+  enable_memory_injection: true
+  enable_loop_detection: true
+```
+
+加载配置：
+
+```python
+from suyi import load_config, get_default_config
+
+# 默认配置
+config = get_default_config()
+
+# 从文件加载
+config = load_config("config.yaml")
+```
+
+## 使用示例
+
+### 基本对话
+
+```python
+import asyncio
+from suyi import AgentLoop, MockLLM, LLMResponse
+
+async def main():
+    llm = MockLLM([LLMResponse.text("你好！我是溯忆。")])
+    loop = AgentLoop(llm=llm)
+    result = await loop.run("你好")
+    print(result.content)  # 你好！我是溯忆。
+
+asyncio.run(main())
+```
+
+### 使用工具
+
+```python
+import asyncio
+from suyi import AgentLoop, MockLLM, LLMResponse, FunctionTool, BudgetTracker, BudgetConfig
+
+async def search(query: str) -> str:
+    return f"搜索结果：{query} 的相关信息..."
+
+search_tool = FunctionTool("search", "搜索互联网", search)
+
+async def main():
+    llm = MockLLM([
+        LLMResponse.action("search", {"query": "Python asyncio"}, content="让我搜索一下。"),
+        LLMResponse.text("Python asyncio 是用于编写并发代码的库。"),
+    ])
+    loop = AgentLoop(
+        llm=llm,
+        tools=[search_tool],
+        budget_tracker=BudgetTracker(BudgetConfig(max_turns=10)),
+    )
+    result = await loop.run("Python asyncio 是什么？")
+    print(result.content)
+
+asyncio.run(main())
+```
+
+### 三层记忆系统
+
+```python
+from suyi import MemoryManager
+
+mgr = MemoryManager()
+
+# 添加语义记忆
+mgr.add_memory("Python GIL 限制了多线程性能", tags=["python", "threading"])
+
+# 检索相关记忆
+results = mgr.retrieve_relevant("Python 多线程")
+for r in results:
+    print(f"[{r['layer']}] {r['content'][:50]}...")
+
+# 巩固与清理
+mgr.consolidate()
+mgr.cleanup()
+```
+
+### 多 Agent 协作
+
+```python
+import asyncio
+from suyi import AgentInstance, AgentConfig, MockLLM, LLMResponse
+
+async def main():
+    researcher = AgentInstance(
+        config=AgentConfig(
+            name="researcher",
+            role="信息检索专家",
+            description="负责搜索和整理信息",
+        ),
+        llm=MockLLM([LLMResponse.text("找到了相关信息。")]),
+    )
+
+    writer = AgentInstance(
+        config=AgentConfig(
+            name="writer",
+            role="内容撰写专家",
+            description="负责将信息整理成文章",
+        ),
+        llm=MockLLM([LLMResponse.text("文章已写好。")]),
+    )
+
+    r1 = await researcher.run("搜索 Python asyncio 相关信息")
+    r2 = await writer.run(f"基于以下信息写文章：{r1.content}")
+    print(r2.content)
+
+asyncio.run(main())
+```
+
+### 流式输出
+
+```python
+import asyncio
+from suyi import StreamHandler, MockLLM, LLMResponse
+
+async def main():
+    llm = MockLLM([LLMResponse.text("这是一段流式输出的文本。")])
+    handler = StreamHandler(llm=llm, chunk_size=3)
+
+    async for chunk in handler.stream("你好"):
+        if chunk.type == "token":
+            print(chunk.content, end="", flush=True)
+        elif chunk.type == "complete":
+            print(f"\n--- 完成（{chunk.metadata['turns']} 轮）---")
+
+asyncio.run(main())
+```
+
+### 会话持久化
+
+```python
+from suyi import SessionManager
+
+mgr = SessionManager(storage_dir="./data")
+
+# 创建会话
+sid = mgr.create_session()
+mgr.add_message(sid, "user", "你好")
+mgr.add_message(sid, "assistant", "你好！有什么可以帮你的？")
+mgr.save_session(sid)
+
+# 加载会话
+data = mgr.load_session(sid)
+print(f"会话 {data.session_id} 有 {len(data.history)} 条消息")
+```
+
+### Web API 服务
+
+```python
+from suyi import SuyiServer, MockLLM, LLMResponse
+
+# 启动 HTTP API 服务
+server = SuyiServer(
+    llm=MockLLM([LLMResponse.text("Hello from Suyi!")]),
+    host="0.0.0.0",
+    port=8080,
+)
+server.start()
+```
+
+API 端点：
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/chat` | 发送消息，获取 Agent 回复 |
+| GET | `/memory` | 查看记忆系统状态 |
+| GET | `/tools` | 列出已注册工具 |
+| POST | `/skills/load` | 加载指定技能 |
+| GET | `/health` | 健康检查 |
+| GET | `/sessions` | 列出已保存会话 |
+
+### 自进化引擎
+
+```python
+from suyi.evolution import (
+    LearningEngine, SkillGenerator, BehaviorEvaluator, FeedbackCollector
+)
+
+engine = LearningEngine()
+engine.record_interaction(record)
+patterns = engine.extract_patterns()
+engine.update_policy()
+
+generator = SkillGenerator()
+skills = generator.generate_from_patterns(patterns)
+```
+
+## 模块说明
+
+### Memory（三层记忆）
+
+- **WorkingMemory**：当前对话上下文，动态组装，Token 预算控制
+- **EpisodicMemory**：会话日志，基于时间衰减的分级压缩
+- **SemanticMemory**：跨会话知识库，TF-IDF 语义检索
+- **MemoryLifecycle**：四阶段遗忘 — 新鲜 → 巩固 → 压缩 → 遗忘
+
+### Core（ReAct 循环）
+
+- **AgentLoop**：Thought → Action → Observation → Final Answer 循环
+- **ContextAssembler**：四层上下文组装（系统 / 身份 / 记忆 / 对话），支持前缀缓存
+- **BudgetTracker**：三维预算 — 轮次 / Token / 墙钟时间，渐进式阈值告警
+
+### Tools（工具系统）
+
+- **AgentTool**：工具基类，支持 `assess_risk()` 运行时风险评估
+- **权限分级**：`auto`（自动执行）/ `confirm`（需确认）/ `block`（禁止执行）
+- **内置工具**：BashTool / ReadFileTool / WriteFileTool / SearchTool / SkillTool
+
+### Skills（技能系统）
+
+- **渐进式披露**：菜单阶段（~100 token/技能）→ 加载阶段 → 执行阶段
+- **SkillLoader**：YAML front-matter 解析，关键词匹配
+- **SkillScanner**：安全扫描，检测危险操作模式
+
+### Middleware（中间件）
+
+- **SummarizationMiddleware**：历史压缩
+- **MemoryInjectMiddleware**：语义记忆注入
+- **LoopDetectionMiddleware**：循环检测
+- **ClarificationMiddleware**：自动澄清
+
+### Multi-Agent（多智能体）
+
+- **AgentInstance**：封装 AgentLoop + Memory + Tools 的独立 Agent
+- **OrchestratorAgent**：任务分解 + 并行调度 + 结果聚合
+- **Pipeline**：串行流水线（A → B → C）
+- **Blackboard**：共享黑板 + 发布订阅
+- **Voting**：多数 / 加权 / 置信度投票
+
+### Evolution（自进化）
+
+- **LearningEngine**：从交互记录中提取行为模式，更新策略
+- **SkillGenerator**：识别高频工具序列，自动生成 SKILL.md
+- **BehaviorEvaluator**：多维度性能评估 + A/B 版本对比
+- **FeedbackCollector**：显式（赞/踩 + 文本）与隐式反馈信号收集
+
+### LLM Adapters（LLM 适配器）
+
+- **OpenAIAdapter**：支持 OpenAI / DeepSeek / Moonshot / Together / Groq 等兼容 API
+- **AnthropicAdapter**：支持 Anthropic Claude Messages API
+- 纯 httpx 实现，不依赖官方 SDK
+- 支持 `chat()` 同步调用与 `chat_stream()` 流式输出
+
+## 配置说明
+
+配置系统使用 dataclass 定义，支持 YAML / JSON / dict 加载：
+
+```python
+from suyi import SuyiConfig, LLMConfig, load_config
+
+# 编程式配置
+config = SuyiConfig(
+    llm=LLMConfig(provider="openai", model="gpt-4o", api_key="sk-..."),
+)
+
+# 从文件加载
+config = load_config("config.yaml")
+
+# 保存配置
+from suyi import save_config
+save_config(config, "config.yaml")
+```
+
+配置项：
+
+| 配置节 | 说明 |
+|--------|------|
+| `llm` | provider / api_key / base_url / model / temperature / max_tokens |
+| `memory` | token_budget / storage_dir |
+| `tools` | enable_bash / enable_file_ops |
+| `middleware` | enable_summarization / enable_memory_injection / enable_loop_detection |
+| `agent` | max_turns / max_tool_retries |
+| `evolution` | enable_learning / enable_skill_generation / enable_evaluation |
+
+## 开发指南
+
+### 环境准备
+
+```bash
+git clone https://github.com/your-org/suyi.git
+cd suyi
+pip install -e ".[dev]"
+```
+
+### 运行测试
+
+```bash
+# 全部测试
+pytest
+
+# 带覆盖率
+pytest --cov=suyi
+
+# 仅运行特定模块测试
+pytest tests/test_persistence.py
+pytest tests/test_streaming.py
+pytest tests/test_web_api.py
+
+# 并行运行
+pytest -n auto
+```
+
+### 项目结构
+
+```
+suyi/
+├── suyi/
+│   ├── __init__.py          # 顶层导出
+│   ├── core/                # ReAct 循环 + 上下文 + 预算
+│   ├── memory/              # 三层记忆系统
+│   ├── tools/               # 工具系统 + 权限
+│   ├── skills/              # 渐进式披露技能系统
+│   ├── middleware/          # 可插拔中间件链
+│   ├── agents/              # 多 Agent 系统
+│   ├── evolution/           # 自进化引擎
+│   ├── llm/                 # LLM 适配器 (OpenAI / Anthropic)
+│   ├── config/              # 配置系统
+│   ├── cli/                 # 交互式 CLI
+│   ├── web/                 # HTTP API 服务器
+│   ├── persistence/         # 会话持久化 (JSON)
+│   ├── streaming/           # 流式输出处理器
+│   └── utils/               # 工具函数
+├── tests/                   # 测试套件 (425 个测试)
+├── examples/                # 示例代码
+├── data/                    # 数据目录
+├── pyproject.toml           # 打包配置
+└── README.md
+```
+
+### 贡献
+
+1. Fork 本仓库
+2. 创建特性分支：`git checkout -b feature/amazing-feature`
+3. 编写代码并添加测试
+4. 确保所有测试通过：`pytest`
+5. 提交 Pull Request
+
+### 编码规范
+
+- Python 3.10+，使用 `from __future__ import annotations`
+- 类型注解全覆盖
+- 每个公共类和方法都有 docstring
+- 测试覆盖所有公共 API
+
+## License
+
+MIT License
+
+Copyright (c) 2025 Suyi Contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
