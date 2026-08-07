@@ -34,7 +34,7 @@ Quick start:
     result = await agent.run("Do something")
 """
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 # Memory
 from .memory import MemoryManager, MemoryLifecycle
@@ -203,6 +203,49 @@ __all__ = [
     "StreamChunk",
     "StreamCallbacks",
     "SuyiServer",
+    # Phase 7: MCP Protocol
+    "PROTOCOL_VERSION",
+    "MCPError",
+    "MCPMessage",
+    "MCPPrompt",
+    "MCPResource",
+    "MCPTool",
+    "Transport",
+    "StdioTransport",
+    "TCPTransport",
+    "MemoryTransport",
+    "MCPServer",
+    "serve_on_transport",
+    "MCPClient",
+    "RemoteMCPTool",
+    # Phase 7: AI Gateway
+    "GatewayRouter",
+    "ProviderEntry",
+    "RoutingRule",
+    "RateLimiter",
+    "TokenBucket",
+    "SlidingWindow",
+    "CostTracker",
+    "CostEntry",
+    "BudgetAlert",
+    "DEFAULT_PRICING",
+    "FallbackChain",
+    "FallbackConfig",
+    "FallbackResult",
+    # Phase 7: Observability
+    "StructuredLogger",
+    "MetricsCollector",
+    "Tracer",
+    "Span",
+    "ObservabilityMiddleware",
+    # Phase 7: Guardrails
+    "ContentFilter",
+    "OutputValidator",
+    "GuardrailsMiddleware",
+    # Phase 7: Human-in-the-Loop
+    "HITLManager",
+    "HITLPolicy",
+    "HITLMiddleware",
 ]
 
 # Phase 2: Skills
@@ -300,3 +343,61 @@ from .streaming import (
     StreamCallbacks,
 )
 from .web import SuyiServer
+
+# Phase 7: MCP Protocol
+from .mcp import (
+    PROTOCOL_VERSION,
+    MCPError,
+    MCPMessage,
+    MCPPrompt,
+    MCPResource,
+    MCPTool,
+    Transport,
+    StdioTransport,
+    TCPTransport,
+    MemoryTransport,
+    MCPServer,
+    serve_on_transport,
+    MCPClient,
+    RemoteMCPTool,
+)
+
+# Phase 7: AI Gateway
+from .gateway import (
+    GatewayRouter,
+    ProviderEntry,
+    RoutingRule,
+    RateLimiter,
+    TokenBucket,
+    SlidingWindow,
+    CostTracker,
+    CostEntry,
+    BudgetAlert,
+    DEFAULT_PRICING,
+    FallbackChain,
+    FallbackConfig,
+    FallbackResult,
+)
+
+# Phase 7: Observability
+from .observability import (
+    StructuredLogger,
+    MetricsCollector,
+    Tracer,
+    Span,
+    ObservabilityMiddleware,
+)
+
+# Phase 7: Guardrails
+from .guardrails import (
+    ContentFilter,
+    OutputValidator,
+    GuardrailsMiddleware,
+)
+
+# Phase 7: Human-in-the-Loop
+from .hitl import (
+    HITLManager,
+    HITLPolicy,
+    HITLMiddleware,
+)

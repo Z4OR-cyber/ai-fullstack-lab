@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "suyi"
-version = "0.2.0"
+version = "0.3.0"
 description = "Suyi（溯忆）— 一个自进化 AI Agent 框架，纯 Python + numpy + httpx 实现"
 readme = "README.md"
 requires-python = ">=3.10"
