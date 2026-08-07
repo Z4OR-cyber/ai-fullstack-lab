@@ -17,59 +17,67 @@ Suyi 是一个纯 Python 实现的自进化 AI Agent 框架，不依赖 PyTorch 
 | **Multi-Agent** | AgentInstance + OrchestratorAgent + 三种协作模式（Pipeline / Blackboard / Voting） |
 | **Evolution** | 自进化引擎 — 行为学习 / 技能自动生成 / 性能评估 / 反馈收集 |
 
-**扩展模块（v0.2.0 新增）：**
+**扩展模块（v0.2.0 — v0.4.0）：**
 
-| 模块 | 说明 |
-|------|------|
-| **LLM Adapters** | OpenAI / Anthropic 适配器，纯 httpx 实现，支持流式输出 |
-| **Config** | 类型安全配置系统，支持 YAML / JSON / dict 加载 |
-| **CLI** | 交互式 REPL，支持 Mock 模式与多提供商切换 |
-| **Web API** | 标准库 HTTP 服务器（不依赖 Flask / FastAPI），支持 CORS |
-| **Persistence** | JSON 文件会话持久化，支持创建 / 保存 / 加载 / 列出 / 导出 |
-| **Streaming** | 异步流式输出处理器，支持逐 token 输出与工具调用中断 |
+| 模块 | 版本 | 说明 |
+|------|------|------|
+| **LLM Adapters** | v0.2.0 | OpenAI / Anthropic 适配器，纯 httpx 实现，支持流式输出 |
+| **Config** | v0.2.0 | 类型安全配置系统，支持 YAML / JSON / dict 加载 |
+| **CLI** | v0.2.0 | 交互式 REPL，支持 Mock 模式与多提供商切换 |
+| **Web API** | v0.2.0 | 标准库 HTTP 服务器（不依赖 Flask / FastAPI），支持 CORS |
+| **Persistence** | v0.2.0 | JSON 文件会话持久化，支持创建 / 保存 / 加载 / 列出 / 导出 |
+| **Streaming** | v0.2.0 | 异步流式输出处理器，支持逐 token 输出与工具调用中断 |
+| **MCP** | v0.3.0 | Model Context Protocol — JSON-RPC 2.0，Server/Client 双向适配，MemoryTransport 测试 |
+| **AI Gateway** | v0.3.0 | GatewayRouter + FallbackChain + 令牌桶限流 + 成本追踪，直接实现 LLMInterface |
+| **Observability** | v0.3.0 | 结构化日志 + Prometheus 指标 + 分布式追踪 + 中间件集成 |
+| **Guardrails** | v0.3.0 | 三档严格度（strict / moderate / lenient），PII 脱敏 + 注入防护 |
+| **HITL** | v0.3.0 | Human-in-the-Loop — 连续 3 次批准自动放行，2 次拒绝自动阻止 |
+| **Evaluation** | v0.4.0 | 评估框架 — 6 个指标类 + Benchmark 基准测试 + A/B 测试统计引擎（纯 numpy） |
+| **Prompts** | v0.4.0 | Prompt 管理 — 模板变量插值 / 继承 / 组合 + 版本管理 / 热重载 + 14 个预置模板 |
 
 ## 架构总览
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                        用户 / CLI / Web API                   │
-├─────────────────────────────────────────────────────────────┤
-│                     Middleware Chain                         │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐    │
-│  │ 压缩中间件 │→│ 记忆注入  │→│ 循环检测  │→│ 澄清中间件 │    │
-│  └──────────┘  └──────────┘  └──────────┘  └──────────┘    │
-├─────────────────────────────────────────────────────────────┤
-│                      Agent Loop (ReAct)                      │
-│  ┌─────────┐   ┌───────────┐   ┌─────────┐   ┌──────────┐  │
-│  │ 预算检查  │→│ 上下文组装  │→│ LLM 调用 │→│ 工具执行  │  │
-│  └─────────┘   └───────────┘   └─────────┘   └──────────┘  │
-├───────────┬─────────────┬──────────────┬────────────────────┤
-│  Memory   │   Tools     │   Skills     │   Multi-Agent      │
-│ ┌────────┐│ ┌─────────┐│ ┌──────────┐ │ ┌────────────────┐ │
-│ │Working ││ │BashTool ││ │Loader    │ │ │Orchestrator    │ │
-│ │Episodic││ │ReadFile ││ │Menu      │ │ │SubAgentManager │ │
-│ │Semantic││ │WriteFile││ │Scanner   │ │ │Pipeline        │ │
-│ └────────┘│ │Search   ││ └──────────┘ │ │Blackboard      │ │
-│           │ │SkillTool││              │ │Voting          │ │
-│           │ └─────────┘│              │ └────────────────┘ │
-├───────────┴─────────────┴──────────────┴────────────────────┤
-│                      Evolution Engine                        │
-│  ┌──────────┐  ┌──────────────┐  ┌───────────┐             │
-│  │ Learner  │→│ SkillGenerator│→│ Evaluator │             │
-│  └──────────┘  └──────────────┘  └───────────┘             │
-│         ↑                                           ↑       │
-│  ┌──────┴──────┐                          ┌──────────┴────┐ │
-│  │FeedbackCollector│                      │InteractionLog │ │
-│  └───────────────┘                       └───────────────┘ │
-├─────────────────────────────────────────────────────────────┤
-│              LLM Adapters (httpx)                            │
-│  ┌──────────────┐    ┌──────────────────┐                   │
-│  │ OpenAIAdapter│    │ AnthropicAdapter │                   │
-│  │ (DeepSeek等) │    │ (Claude)         │                   │
-│  └──────────────┘    └──────────────────┘                   │
-├─────────────────────────────────────────────────────────────┤
-│        Persistence (JSON)  │  Streaming (async gen)         │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                 用户 / CLI / Web API / MCP Client                 │
+├──────────────────────────────────────────────────────────────────┤
+│                   Middleware Chain (7 层)                         │
+│  Observability(5) → Summarization(10) → Guardrails(15) →        │
+│  MemoryInject(20) → LoopDetection(30) → HITL(35) → Clarify(40)  │
+├──────────────────────────────────────────────────────────────────┤
+│                      Agent Loop (ReAct)                          │
+│  ┌─────────┐   ┌───────────┐   ┌─────────┐   ┌──────────┐      │
+│  │ 预算检查  │→│ 上下文组装  │→│ LLM 调用 │→│ 工具执行  │      │
+│  └─────────┘   └───────────┘   └─────────┘   └──────────┘      │
+├───────────┬─────────────┬──────────────┬────────────────────────┤
+│  Memory   │   Tools     │   Skills     │   Multi-Agent          │
+│ ┌────────┐│ ┌─────────┐│ ┌──────────┐ │ ┌────────────────┐     │
+│ │Working ││ │BashTool ││ │Loader    │ │ │Orchestrator    │     │
+│ │Episodic││ │ReadFile ││ │Menu      │ │ │SubAgentManager │     │
+│ │Semantic││ │WriteFile││ │Scanner   │ │ │Pipeline        │     │
+│ └────────┘│ │Search   ││ └──────────┘ │ │Blackboard      │     │
+│           │ │SkillTool││              │ │Voting          │     │
+│           │ └─────────┘│              │ └────────────────┘     │
+├───────────┴─────────────┴──────────────┴────────────────────────┤
+│           Evolution Engine         Evaluation Framework          │
+│  ┌──────────┐ ┌────────────┐ ┌───────────┐  ┌──────────────┐   │
+│  │ Learner  │→│SkillGenerat│→│ Evaluator │  │ Metrics      │   │
+│  └──────────┘ └────────────┘ └───────────┘  │ Benchmark    │   │
+│         ↑           ↑                        │ A/B Testing   │   │
+│  ┌──────┴──────┐ ┌─┴──────────┐             └──────────────┘   │
+│  │FeedbackColl │ │Interaction │                                │
+│  └─────────────┘ └────────────┘                                │
+├──────────────────────────────────────────────────────────────────┤
+│         AI Gateway (Router + Fallback + RateLimit + Cost)        │
+├──────────────────────────────────────────────────────────────────┤
+│           LLM Adapters (httpx)        Prompt Management          │
+│  ┌──────────────┐  ┌────────────────┐  ┌──────────────────┐     │
+│  │ OpenAIAdapter│  │AnthropicAdapter│  │ Template Manager │     │
+│  │ (DeepSeek等) │  │ (Claude)       │  │ Library (14模板) │     │
+│  └──────────────┘  └────────────────┘  └──────────────────┘     │
+├──────────────────────────────────────────────────────────────────┤
+│ Persistence(JSON)│Streaming│MCP Server│Guardrails│HITL│Observability│
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 ## 快速开始
