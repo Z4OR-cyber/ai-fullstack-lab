@@ -177,6 +177,25 @@ __all__ = [
     "Vote",
     "VoteResult",
     "VotingStrategy",
+    # Phase 5: LLM Adapters
+    "OpenAIAdapter",
+    "AnthropicAdapter",
+    "create_llm",
+    "create_llm_from_config",
+    "register_provider",
+    "list_providers",
+    # Phase 5: Configuration
+    "SuyiConfig",
+    "LLMConfig",
+    "MemoryConfig",
+    "ToolConfig",
+    "MiddlewareConfig",
+    "ConfigAgentConfig",
+    "ConfigEvolutionConfig",
+    "load_config",
+    "load_config_from_dict",
+    "get_default_config",
+    "save_config",
 ]
 
 # Phase 2: Skills
@@ -236,4 +255,29 @@ from .evolution import (
     FeedbackSignal,
     FeedbackCollector,
     EvolutionOrchestrator,
+)
+
+# Phase 5: LLM Adapters & Configuration
+from .llm import (
+    OpenAIAdapter,
+    AnthropicAdapter,
+    create_llm,
+    create_llm_from_config,
+    register_provider,
+    list_providers,
+)
+from .config import (
+    SuyiConfig,
+    LLMConfig,
+    MemoryConfig,
+    ToolConfig,
+    MiddlewareConfig,
+    # AgentConfig from config module — aliased to avoid conflict
+    # with agents.AgentConfig which is the sub-agent configuration
+    AgentConfig as ConfigAgentConfig,
+    EvolutionConfig as ConfigEvolutionConfig,
+    load_config,
+    load_config_from_dict,
+    get_default_config,
+    save_config,
 )

@@ -1,0 +1,44 @@
+# Suyi Default Configuration
+# This file provides sensible defaults for all subsystems.
+# Copy and modify as needed for your deployment.
+
+llm:
+  provider: openai
+  # api_key: null  # Set here or via OPENAI_API_KEY env var
+  # base_url: null  # Auto-detected from provider
+  model: gpt-4o
+  temperature: 0.7
+  max_tokens: 4096
+
+memory:
+  working_capacity: 20
+  episodic_compression_threshold: 10
+  semantic_top_k: 5
+
+tools:
+  max_retries: 2
+  parallel_enabled: true
+  timeout: 60.0
+
+middleware:
+  enabled:
+    - summarization
+    - memory_inject
+    - loop_detection
+    - clarification
+  summarize: true
+  memory_inject: true
+  loop_detection: true
+  clarification: true
+
+agent:
+  name: suyi
+  max_iterations: 25
+  budget:
+    max_turns: 25
+    max_tokens: 100000
+    max_wall_clock: 300
+
+evolution:
+  learning_enabled: false
+  eval_interval: 50
