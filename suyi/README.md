@@ -42,6 +42,10 @@ Suyi 是一个纯 Python 实现的自进化 AI Agent 框架，不依赖 PyTorch 
 | **Caching Layer** | v0.6.0 | 精确缓存（SHA-256）+ 语义缓存（TF-IDF 相似度）+ LRU 淘汰 + TTL + JSON 持久化 |
 | **Workflow Engine** | v0.6.0 | DAG 工作流引擎 — 条件分支 / 并行执行 / 循环检测 / 失败重试 / 三种失败策略 |
 | **Event System** | v0.6.0 | 事件总线 — 同步/异步发布订阅 + fnmatch 通配符 + 15 种标准事件类型 + 事件历史 |
+| **Plugin System** | v0.7.0 | 插件系统 — 热加载/卸载 + 依赖图拓扑排序 + 多源加载（文件/包/entry_points） |
+| **Deploy Templates** | v0.7.0 | 部署模板 — Docker（Dockerfile + docker-compose）+ K8s（Deployment/Service/Ingress）配置生成 |
+| **Vector Store** | v0.7.0 | 向量存储 — 纯 numpy 余弦相似度 + L2 距离 + Top-K 检索 + RAG/Memory 适配器 |
+| **Multimodal** | v0.7.0 | 多模态输入 — 统一容器（text/image/audio/video）+ 格式检测 + base64 编解码 |
 
 ## 架构总览
 
@@ -49,9 +53,10 @@ Suyi 是一个纯 Python 实现的自进化 AI Agent 框架，不依赖 PyTorch 
 ┌──────────────────────────────────────────────────────────────────┐
 │                 用户 / CLI / Web API / MCP Client                 │
 ├──────────────────────────────────────────────────────────────────┤
-│                   Middleware Chain (7 层)                         │
+│                   Middleware Chain (8 层)                         │
 │  Observability(5) → Summarization(10) → Guardrails(15) →        │
-│  MemoryInject(20) → LoopDetection(30) → HITL(35) → Clarify(40)  │
+│  MemoryInject(20) → PreLLMInject(25) → LoopDetection(30) →      │
+│  HITL(35) → Clarify(40)                                          │
 ├──────────────────────────────────────────────────────────────────┤
 │                      Agent Loop (ReAct)                          │
 │  ┌─────────┐   ┌───────────┐   ┌─────────┐   ┌──────────┐      │
@@ -405,6 +410,32 @@ skills = generator.generate_from_patterns(patterns)
 - **EventBus**：同步 / 异步发布订阅，fnmatch 通配符匹配，一次性订阅，事件历史，全局总线单例
 - **EventType**：15 种标准事件 — before/after LLM call、before/after tool call、memory_updated、skill_loaded、agent_spawned、error 等
 
+### Plugin System（插件系统 v0.7.0）
+
+- **PluginBase**：抽象基类，定义 init/start/stop 生命周期 + hooks 注册系统
+- **PluginRegistry**：插件注册表，依赖图 + 拓扑排序 + 反向依赖追踪 + 安全卸载检查
+- **PluginLoader**：多源加载器 — 文件路径 / Python 包 / entry_points，自动检测
+- **PluginManager**：全生命周期管理 — 加载/启动/停止/卸载/热重载，依赖排序启动
+
+### Deployment Templates（部署模板 v0.7.0）
+
+- **DeploymentConfig**：部署配置 — 环境变量映射 + 健康检查 + 资源限制 + dev/prod 工厂方法
+- **DockerConfigGenerator**：生成 Dockerfile + docker-compose.yml（含健康检查、资源限制、环境变量）
+- **K8sConfigGenerator**：生成 Deployment/Service/Ingress YAML（含 liveness/readiness probes、resources、volumes）
+
+### Vector Store（向量存储 v0.7.0）
+
+- **VectorStoreBase**：抽象接口 — add / search / delete
+- **InMemoryVectorStore**：纯 numpy 实现 — 余弦相似度 + L2 距离 + 批量插入 + Top-K 检索 + 过滤
+- **VectorStoreRetrieverAdapter**：桥接 Memory 模块 RetrievalChain
+- **RAGVectorStoreAdapter**：桥接 RAG Pipeline
+
+### Multimodal（多模态输入 v0.7.0）
+
+- **MultimodalInput**：统一输入容器 — text / image / audio / video
+- **InputProcessor**：格式检测 + 大小验证 + MIME 类型处理
+- **FormatConverter**：base64 编解码 + data URI 转换 + MIME 类型映射
+
 ### Evolution（自进化）
 
 - **LearningEngine**：从交互记录中提取行为模式，更新策略
@@ -501,8 +532,12 @@ suyi/
 │   ├── cache/               # 缓存层 (精确+语义 LRU)
 │   ├── workflow/            # 工作流引擎 (DAG/并行/重试)
 │   ├── events/              # 事件系统 (发布订阅/通配符)
+│   ├── plugins/             # 插件系统 (热加载/依赖图)
+│   ├── deploy/              # 部署模板 (Docker/K8s)
+│   ├── vectorstore/         # 向量存储 (numpy余弦相似度)
+│   ├── multimodal/          # 多模态输入 (text/image/audio/video)
 │   └── utils/               # 工具函数
-├── tests/                   # 测试套件 (1410 个测试)
+├── tests/                   # 测试套件 (1661 个测试)
 ├── examples/                # 示例代码
 ├── data/                    # 数据目录
 ├── pyproject.toml           # 打包配置
