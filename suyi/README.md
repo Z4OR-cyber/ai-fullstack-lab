@@ -17,7 +17,7 @@ Suyi 是一个纯 Python 实现的自进化 AI Agent 框架，不依赖 PyTorch 
 | **Multi-Agent** | AgentInstance + OrchestratorAgent + 三种协作模式（Pipeline / Blackboard / Voting） |
 | **Evolution** | 自进化引擎 — 行为学习 / 技能自动生成 / 性能评估 / 反馈收集 |
 
-**扩展模块（v0.2.0 — v0.4.0）：**
+**扩展模块（v0.2.0 — v0.5.0）：**
 
 | 模块 | 版本 | 说明 |
 |------|------|------|
@@ -34,6 +34,10 @@ Suyi 是一个纯 Python 实现的自进化 AI Agent 框架，不依赖 PyTorch 
 | **HITL** | v0.3.0 | Human-in-the-Loop — 连续 3 次批准自动放行，2 次拒绝自动阻止 |
 | **Evaluation** | v0.4.0 | 评估框架 — 6 个指标类 + Benchmark 基准测试 + A/B 测试统计引擎（纯 numpy） |
 | **Prompts** | v0.4.0 | Prompt 管理 — 模板变量插值 / 继承 / 组合 + 版本管理 / 热重载 + 14 个预置模板 |
+| **Memory Refactor** | v0.5.0 | 7 层记忆 — Ground Truth / Structured Facts / Auto Wiki / 四级回退检索链 / 语义去重 / Trust Scoring / Trivial 跳过 |
+| **Pre-LLM Inject** | v0.5.0 | Pre-LLM-Call 自动记忆注入中间件 — 并行查询四层记忆 + 相关性阈值过滤 |
+| **Agent Pipeline** | v0.5.0 | Agent 接力 Pipeline — 声明式链路 / 数据契约校验 / 条件跳转 |
+| **Swarm** | v0.5.0 | Swarm 蜂群自治 — 共享任务板 + 能力标签匹配 + 并行执行 + Guardrails/HITL 集成 |
 
 ## 架构总览
 
@@ -321,11 +325,17 @@ skills = generator.generate_from_patterns(patterns)
 
 ## 模块说明
 
-### Memory（三层记忆）
+### Memory（七层记忆 v0.5.0）
 
+- **GroundTruth**：最高优先级记忆，冲突检测，不会被遗忘或覆盖
+- **StructuredFacts**：实体-属性-值三元组，Trust Scoring（用户陈述 0.95 / Agent 推断 0.6 / 推测 0.3）
 - **WorkingMemory**：当前对话上下文，动态组装，Token 预算控制
 - **EpisodicMemory**：会话日志，基于时间衰减的分级压缩
 - **SemanticMemory**：跨会话知识库，TF-IDF 语义检索
+- **AutoWiki**：自动知识整理 — 从会话和事实中提取概念关系，生成 Wiki 页面
+- **RetrievalChain**：四级回退检索链 — Hybrid → Dense → Lexical → SQLite
+- **SemanticDedup**：Cosine 相似度去重，信息并集合并策略
+- **MessageClassifier**：Trivial 消息跳过（"好的""谢谢"等不写入记忆）
 - **MemoryLifecycle**：四阶段遗忘 — 新鲜 → 巩固 → 压缩 → 遗忘
 
 ### Core（ReAct 循环）
@@ -346,11 +356,15 @@ skills = generator.generate_from_patterns(patterns)
 - **SkillLoader**：YAML front-matter 解析，关键词匹配
 - **SkillScanner**：安全扫描，检测危险操作模式
 
-### Middleware（中间件）
+### Middleware（中间件链 8 层）
 
+- **ObservabilityMiddleware**（v0.3.0）：结构化日志 + 指标 + 追踪
 - **SummarizationMiddleware**：历史压缩
+- **GuardrailsMiddleware**（v0.3.0）：PII 脱敏 + 注入防护
 - **MemoryInjectMiddleware**：语义记忆注入
+- **PreLLMInjectMiddleware**（v0.5.0）：Pre-LLM-Call 并行查询四层记忆 + 相关性阈值过滤
 - **LoopDetectionMiddleware**：循环检测
+- **HITLMiddleware**（v0.3.0）：Human-in-the-Loop 审批
 - **ClarificationMiddleware**：自动澄清
 
 ### Multi-Agent（多智能体）
@@ -360,6 +374,8 @@ skills = generator.generate_from_patterns(patterns)
 - **Pipeline**：串行流水线（A → B → C）
 - **Blackboard**：共享黑板 + 发布订阅
 - **Voting**：多数 / 加权 / 置信度投票
+- **AgentPipeline**（v0.5.0）：声明式接力链 — 数据契约校验 + 条件跳转 + 上下文传递
+- **Swarm**（v0.5.0）：蜂群自治模式 — 共享任务板 + 能力标签匹配 + 并行执行 + Guardrails/HITL 集成
 
 ### Evolution（自进化）
 
