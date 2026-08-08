@@ -34,7 +34,7 @@ Quick start:
     result = await agent.run("Do something")
 """
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 
 # Memory
 from .memory import (
@@ -370,6 +370,45 @@ __all__ = [
     "skill_loaded",
     "agent_spawned",
     "error_event",
+    # Phase 11: Plugin System
+    "PluginManager",
+    "PluginBase",
+    "PluginContext",
+    "PluginState",
+    "PluginRegistry",
+    "PluginEntry",
+    "load_from_file",
+    "load_from_package",
+    "load_plugin",
+    "PluginLoadError",
+    # Phase 11: Deployment Templates
+    "DeploymentConfig",
+    "Environment",
+    "EnvVar",
+    "HealthCheck",
+    "ResourceLimits",
+    "DockerConfigGenerator",
+    "K8sConfigGenerator",
+    "generate_dockerfile",
+    "generate_compose",
+    "generate_k8s_deployment",
+    "generate_k8s_service",
+    "generate_k8s_ingress",
+    "generate_all_k8s",
+    # Phase 11: Vector Store
+    "VectorStoreBase",
+    "InMemoryVectorStore",
+    "VectorRecord",
+    "SearchResult",
+    "VectorStoreRetrieverAdapter",
+    "RAGVectorStoreAdapter",
+    # Phase 11: Multimodal Support
+    "MultimodalInput",
+    "MediaContent",
+    "ModalityType",
+    "InputProcessor",
+    "ProcessResult",
+    "FormatConverter",
 ]
 
 # Phase 2: Skills
@@ -625,4 +664,55 @@ from .events import (
     skill_loaded,
     agent_spawned,
     error_event,
+)
+
+# Phase 11: Plugin System
+from .plugins import (
+    PluginManager,
+    PluginBase,
+    PluginContext,
+    PluginState,
+    PluginRegistry,
+    PluginEntry,
+    load_from_file,
+    load_from_package,
+    load_plugin,
+    PluginLoadError,
+)
+
+# Phase 11: Deployment Templates
+from .deploy import (
+    DeploymentConfig,
+    Environment,
+    EnvVar,
+    HealthCheck,
+    ResourceLimits,
+    DockerConfigGenerator,
+    K8sConfigGenerator,
+    generate_dockerfile,
+    generate_compose,
+    generate_k8s_deployment,
+    generate_k8s_service,
+    generate_k8s_ingress,
+    generate_all_k8s,
+)
+
+# Phase 11: Vector Store
+from .vectorstore import (
+    VectorStoreBase,
+    InMemoryVectorStore,
+    VectorRecord,
+    SearchResult,
+    VectorStoreRetrieverAdapter,
+    RAGVectorStoreAdapter,
+)
+
+# Phase 11: Multimodal Support
+from .multimodal import (
+    MultimodalInput,
+    MediaContent,
+    ModalityType,
+    InputProcessor,
+    ProcessResult,
+    FormatConverter,
 )
