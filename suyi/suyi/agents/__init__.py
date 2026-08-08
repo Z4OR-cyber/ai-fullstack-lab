@@ -60,6 +60,20 @@ from .patterns import (
     VoteResult,
     VotingStrategy,
 )
+from .pipeline import (
+    DataSchema,
+    PipelineStep,
+    PipelineExecutionResult,
+    AgentPipeline,
+)
+from .swarm import (
+    TaskStatus,
+    SharedTask,
+    SwarmGoal,
+    SwarmAgentInfo,
+    SharedTaskBoard,
+    SwarmCoordinator,
+)
 
 __all__ = [
     # Base
@@ -84,4 +98,16 @@ __all__ = [
     "Vote",
     "VoteResult",
     "VotingStrategy",
+    # Phase 9: Agent Relay Pipeline
+    "DataSchema",
+    "PipelineStep",
+    "PipelineExecutionResult",
+    "AgentPipeline",
+    # Phase 9: Swarm
+    "TaskStatus",
+    "SharedTask",
+    "SwarmGoal",
+    "SwarmAgentInfo",
+    "SharedTaskBoard",
+    "SwarmCoordinator",
 ]

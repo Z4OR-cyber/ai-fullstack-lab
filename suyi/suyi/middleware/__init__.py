@@ -40,6 +40,7 @@ from .summarization import SummarizationMiddleware
 from .memory_inject import MemoryInjectMiddleware
 from .loop_detection import LoopDetectionMiddleware
 from .clarification import ClarificationMiddleware
+from .pre_llm_inject import PreLLMInjectMiddleware
 
 __all__ = [
     # 基类
@@ -51,6 +52,8 @@ __all__ = [
     "MemoryInjectMiddleware",
     "LoopDetectionMiddleware",
     "ClarificationMiddleware",
+    # Phase 9: Pre-LLM 记忆注入
+    "PreLLMInjectMiddleware",
     # 工厂函数
     "get_default_middleware",
 ]

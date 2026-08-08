@@ -34,13 +34,33 @@ Quick start:
     result = await agent.run("Do something")
 """
 
-__version__ = "0.3.0"
+__version__ = "0.5.0"
 
 # Memory
-from .memory import MemoryManager, MemoryLifecycle
-from .memory.working import WorkingMemory
-from .memory.episodic import EpisodicMemory
-from .memory.semantic import SemanticMemory
+from .memory import (
+    MemoryManager,
+    MemoryLifecycle,
+    MemoryPriority,
+    WorkingMemory,
+    EpisodicMemory,
+    SemanticMemory,
+    StructuredFact,
+    StructuredFactsStore,
+    FactSource,
+    GroundTruthEntry,
+    GroundTruthStore,
+    WikiPage,
+    AutoWiki,
+    MemoryItem,
+    BaseRetriever,
+    HybridRetriever,
+    DenseRetriever,
+    LexicalRetriever,
+    SQLiteRetriever,
+    RetrievalChain,
+    SemanticDeduplicator,
+    MessageClassifier,
+)
 
 # Core
 from .core import (
@@ -99,9 +119,27 @@ __all__ = [
     # Memory
     "MemoryManager",
     "MemoryLifecycle",
+    "MemoryPriority",
     "WorkingMemory",
     "EpisodicMemory",
     "SemanticMemory",
+    # Phase 9: Memory layers
+    "StructuredFact",
+    "StructuredFactsStore",
+    "FactSource",
+    "GroundTruthEntry",
+    "GroundTruthStore",
+    "WikiPage",
+    "AutoWiki",
+    "MemoryItem",
+    "BaseRetriever",
+    "HybridRetriever",
+    "DenseRetriever",
+    "LexicalRetriever",
+    "SQLiteRetriever",
+    "RetrievalChain",
+    "SemanticDeduplicator",
+    "MessageClassifier",
     # Core
     "AgentLoop",
     "ContextAssembler",
@@ -157,6 +195,7 @@ __all__ = [
     "MemoryInjectMiddleware",
     "LoopDetectionMiddleware",
     "ClarificationMiddleware",
+    "PreLLMInjectMiddleware",
     "get_default_middleware",
     # Phase 3: Multi-Agent
     "AgentInstance",
@@ -177,6 +216,18 @@ __all__ = [
     "Vote",
     "VoteResult",
     "VotingStrategy",
+    # Phase 9: Agent Relay Pipeline
+    "DataSchema",
+    "PipelineStep",
+    "PipelineExecutionResult",
+    "AgentPipeline",
+    # Phase 9: Swarm
+    "TaskStatus",
+    "SharedTask",
+    "SwarmGoal",
+    "SwarmAgentInfo",
+    "SharedTaskBoard",
+    "SwarmCoordinator",
     # Phase 5: LLM Adapters
     "OpenAIAdapter",
     "AnthropicAdapter",
@@ -246,6 +297,39 @@ __all__ = [
     "HITLManager",
     "HITLPolicy",
     "HITLMiddleware",
+    # Phase 8: Evaluation Framework
+    "MetricBase",
+    "MetricResult",
+    "MetricSuite",
+    "SuiteReport",
+    "TraceRecord",
+    "TaskCompletionMetric",
+    "ToolUsageMetric",
+    "LatencyMetric",
+    "TokenEfficiencyMetric",
+    "ReasoningQualityMetric",
+    "HallucinationMetric",
+    "get_default_metrics",
+    "BenchmarkCase",
+    "CaseResult",
+    "BenchmarkSuite",
+    "BenchmarkRunner",
+    "BenchmarkReport",
+    "ABTest",
+    "ABTestResult",
+    "StatisticalSignificance",
+    # Phase 8: Prompt Management
+    "PromptTemplate",
+    "SystemPrompt",
+    "ReActPrompt",
+    "ToolPrompt",
+    "MultiAgentPrompt",
+    "PromptManager",
+    "TemplateVersion",
+    "PromptLibrary",
+    "get_library",
+    "get_template",
+    "render_template",
 ]
 
 # Phase 2: Skills
@@ -264,6 +348,7 @@ from .middleware import (
     MemoryInjectMiddleware,
     LoopDetectionMiddleware,
     ClarificationMiddleware,
+    PreLLMInjectMiddleware,
     get_default_middleware,
 )
 
@@ -287,6 +372,18 @@ from .agents import (
     Vote,
     VoteResult,
     VotingStrategy,
+    # Phase 9: Agent Relay Pipeline
+    DataSchema,
+    PipelineStep,
+    PipelineExecutionResult,
+    AgentPipeline,
+    # Phase 9: Swarm
+    TaskStatus,
+    SharedTask,
+    SwarmGoal,
+    SwarmAgentInfo,
+    SharedTaskBoard,
+    SwarmCoordinator,
 )
 
 # Phase 4: Evolution Engine
@@ -400,4 +497,40 @@ from .hitl import (
     HITLManager,
     HITLPolicy,
     HITLMiddleware,
+)
+# Phase 8: Evaluation Framework & Prompt Management
+from .evaluation import (
+    MetricBase,
+    MetricResult,
+    MetricSuite,
+    SuiteReport,
+    TraceRecord,
+    TaskCompletionMetric,
+    ToolUsageMetric,
+    LatencyMetric,
+    TokenEfficiencyMetric,
+    ReasoningQualityMetric,
+    HallucinationMetric,
+    get_default_metrics,
+    BenchmarkCase,
+    CaseResult,
+    BenchmarkSuite,
+    BenchmarkRunner,
+    BenchmarkReport,
+    ABTest,
+    ABTestResult,
+    StatisticalSignificance,
+)
+from .prompts import (
+    PromptTemplate,
+    SystemPrompt,
+    ReActPrompt,
+    ToolPrompt,
+    MultiAgentPrompt,
+    PromptManager,
+    TemplateVersion,
+    PromptLibrary,
+    get_library,
+    get_template,
+    render_template,
 )

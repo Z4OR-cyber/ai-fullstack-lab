@@ -1,18 +1,29 @@
-"""Memory System — three-layer memory with lifecycle management.
+"""Memory System — seven-layer memory with lifecycle management.
 
-Exports :class:`MemoryManager` which provides a unified API over three
+Exports :class:`MemoryManager` which provides a unified API over seven
 memory layers:
 
+- **Ground Truth** (:class:`~.ground_truth.GroundTruthStore`) — 最高优先级
+  记忆，覆盖其他层冲突。
 - **Working Memory** (:class:`~.working.WorkingMemory`) — current
   conversation context, dynamically assembled each turn.
+- **Structured Facts** (:class:`~.structured_facts.StructuredFactsStore`) —
+  实体-属性-值三元组，附带 trust_score。
 - **Episodic Memory** (:class:`~.episodic.EpisodicMemory`) — session
   logs with age-based graded compression.
 - **Semantic Memory** (:class:`~.semantic.SemanticMemory`) — cross-session
-  knowledge base with TF-IDF retrieval.
+  knowledge base with TF-IDF retrieval (vector layer).
+- **Auto Wiki** (:class:`~.auto_wiki.AutoWiki`) — 自动知识整理，
+  从会话和事实中提取概念/实体关系。
 
 The :class:`~.lifecycle.MemoryLifecycle` drives a four-stage forgetting
 process (fresh → consolidation → compression → forgetting) that
 automatically promotes high-confidence memories and evicts stale ones.
+
+Additional modules:
+    - :class:`~.retrieval_chain.RetrievalChain` — 四级回退检索链
+    - :class:`~.dedup.SemanticDeduplicator` — 语义去重
+    - :class:`~.message_classifier.MessageClassifier` — 平凡消息分类
 
 Quick start
 -----------
@@ -32,12 +43,41 @@ from __future__ import annotations
 
 import os
 import time
+from enum import IntEnum
 from typing import Any, Dict, List, Optional
 
 from .working import WorkingMemory, BudgetStatus
 from .episodic import EpisodicMemory, Episode
 from .semantic import SemanticMemory, MemoryEntry
 from .lifecycle import MemoryLifecycle
+from .structured_facts import StructuredFact, StructuredFactsStore, FactSource
+from .ground_truth import GroundTruthEntry, GroundTruthStore
+from .auto_wiki import WikiPage, AutoWiki
+from .retrieval_chain import (
+    MemoryItem,
+    BaseRetriever,
+    HybridRetriever,
+    DenseRetriever,
+    LexicalRetriever,
+    SQLiteRetriever,
+    RetrievalChain,
+)
+from .dedup import SemanticDeduplicator
+from .message_classifier import MessageClassifier
+
+
+class MemoryPriority(IntEnum):
+    """记忆层优先级枚举（数字越大优先级越高）。
+
+    GROUND_TRUTH > WORKSPACE > FACTS > SESSIONS > VECTOR > WIKI
+    """
+
+    WIKI = 1
+    VECTOR = 2
+    SESSIONS = 3
+    FACTS = 4
+    WORKSPACE = 5
+    GROUND_TRUTH = 6
 
 
 class MemoryManager:
@@ -51,6 +91,11 @@ class MemoryManager:
         episodic: The :class:`EpisodicMemory` instance.
         semantic: The :class:`SemanticMemory` instance.
         lifecycle: The :class:`MemoryLifecycle` instance.
+        ground_truth: The :class:`GroundTruthStore` instance (最高优先级).
+        structured_facts: The :class:`StructuredFactsStore` instance.
+        auto_wiki: The :class:`AutoWiki` instance.
+        message_classifier: The :class:`MessageClassifier` instance.
+        deduplicator: The :class:`SemanticDeduplicator` instance.
         storage_dir: Directory used for JSON persistence.
     """
 
@@ -86,11 +131,17 @@ class MemoryManager:
         # Build file paths
         episodic_path = None
         semantic_path = None
+        ground_truth_path = None
+        facts_path = None
+        wiki_path = None
         if self._persist and storage_dir:
             episodic_path = os.path.join(storage_dir, 'episodic.json')
             semantic_path = os.path.join(storage_dir, 'semantic.json')
+            ground_truth_path = os.path.join(storage_dir, 'ground_truth.json')
+            facts_path = os.path.join(storage_dir, 'structured_facts.json')
+            wiki_path = os.path.join(storage_dir, 'auto_wiki.json')
 
-        # Create the three layers
+        # Create the three original layers
         self.working = WorkingMemory(
             token_budget=token_budget,
             system_prompt=system_prompt,
@@ -102,6 +153,13 @@ class MemoryManager:
             storage_path=semantic_path,
         )
         self.lifecycle = MemoryLifecycle()
+
+        # Phase 9: 新增四层记忆
+        self.ground_truth = GroundTruthStore(storage_path=ground_truth_path)
+        self.structured_facts = StructuredFactsStore(storage_path=facts_path)
+        self.auto_wiki = AutoWiki(storage_path=wiki_path)
+        self.message_classifier = MessageClassifier()
+        self.deduplicator = SemanticDeduplicator()
 
     # ------------------------------------------------------------------
     #  Working memory passthrough
@@ -445,6 +503,15 @@ class MemoryManager:
                 'entries': len(self.semantic),
                 'vocabulary': len(self.semantic.tfidf.vocabulary),
             },
+            'ground_truth': {
+                'entries': len(self.ground_truth),
+            },
+            'structured_facts': {
+                'facts': len(self.structured_facts),
+            },
+            'auto_wiki': {
+                'pages': len(self.auto_wiki),
+            },
             'lifecycle': lifecycle_report,
             'storage_dir': self.storage_dir,
             'persistence': self._persist,
@@ -464,6 +531,7 @@ class MemoryManager:
 # ----------------------------------------------------------------------
 __all__ = [
     'MemoryManager',
+    'MemoryPriority',
     'WorkingMemory',
     'BudgetStatus',
     'EpisodicMemory',
@@ -471,4 +539,22 @@ __all__ = [
     'SemanticMemory',
     'MemoryEntry',
     'MemoryLifecycle',
+    # Phase 9: 新增记忆层
+    'StructuredFact',
+    'StructuredFactsStore',
+    'FactSource',
+    'GroundTruthEntry',
+    'GroundTruthStore',
+    'WikiPage',
+    'AutoWiki',
+    # Phase 9: 检索与工具
+    'MemoryItem',
+    'BaseRetriever',
+    'HybridRetriever',
+    'DenseRetriever',
+    'LexicalRetriever',
+    'SQLiteRetriever',
+    'RetrievalChain',
+    'SemanticDeduplicator',
+    'MessageClassifier',
 ]
