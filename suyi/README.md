@@ -17,7 +17,7 @@ Suyi 是一个纯 Python 实现的自进化 AI Agent 框架，不依赖 PyTorch 
 | **Multi-Agent** | AgentInstance + OrchestratorAgent + 三种协作模式（Pipeline / Blackboard / Voting） |
 | **Evolution** | 自进化引擎 — 行为学习 / 技能自动生成 / 性能评估 / 反馈收集 |
 
-**扩展模块（v0.2.0 — v0.5.0）：**
+**扩展模块（v0.2.0 — v0.6.0）：**
 
 | 模块 | 版本 | 说明 |
 |------|------|------|
@@ -38,6 +38,10 @@ Suyi 是一个纯 Python 实现的自进化 AI Agent 框架，不依赖 PyTorch 
 | **Pre-LLM Inject** | v0.5.0 | Pre-LLM-Call 自动记忆注入中间件 — 并行查询四层记忆 + 相关性阈值过滤 |
 | **Agent Pipeline** | v0.5.0 | Agent 接力 Pipeline — 声明式链路 / 数据契约校验 / 条件跳转 |
 | **Swarm** | v0.5.0 | Swarm 蜂群自治 — 共享任务板 + 能力标签匹配 + 并行执行 + Guardrails/HITL 集成 |
+| **RAG Pipeline** | v0.6.0 | 文档分块（固定/句子/语义）+ RAG 完整管道（ingest→chunk→embed→store→retrieve→augment） |
+| **Caching Layer** | v0.6.0 | 精确缓存（SHA-256）+ 语义缓存（TF-IDF 相似度）+ LRU 淘汰 + TTL + JSON 持久化 |
+| **Workflow Engine** | v0.6.0 | DAG 工作流引擎 — 条件分支 / 并行执行 / 循环检测 / 失败重试 / 三种失败策略 |
+| **Event System** | v0.6.0 | 事件总线 — 同步/异步发布订阅 + fnmatch 通配符 + 15 种标准事件类型 + 事件历史 |
 
 ## 架构总览
 
@@ -377,6 +381,30 @@ skills = generator.generate_from_patterns(patterns)
 - **AgentPipeline**（v0.5.0）：声明式接力链 — 数据契约校验 + 条件跳转 + 上下文传递
 - **Swarm**（v0.5.0）：蜂群自治模式 — 共享任务板 + 能力标签匹配 + 并行执行 + Guardrails/HITL 集成
 
+### RAG Pipeline（检索增强生成 v0.6.0）
+
+- **FixedSizeChunker**：固定大小分块，可配置重叠窗口
+- **SentenceChunker**：句子边界分块，保持语义完整性
+- **SemanticChunker**：Markdown 标题 + 段落语义分块
+- **RAGRetriever**：复用 Memory 四级回退检索链，带文档来源标记
+- **RAGPipeline**：完整管道 — ingest → chunk → embed → store → retrieve → augment
+
+### Caching Layer（缓存层 v0.6.0）
+
+- **ExactCache**：SHA-256 hash 精确匹配，O(1) 查找
+- **SemanticCache**：TF-IDF 相似度语义缓存，模糊命中
+- **CacheManager**：整合精确 + 语义缓存，LRU 淘汰策略，大小限制，命中统计，JSON 持久化
+
+### Workflow Engine（工作流引擎 v0.6.0）
+
+- **DAG**：有向无环图定义 — Node / Edge / NodeStatus，条件分支，循环检测（DFS），拓扑排序
+- **WorkflowEngine**：拓扑排序执行，asyncio.gather 并行，可配置重试（max_retries），三种失败策略（STOP / CONTINUE / RETRY）
+
+### Event System（事件系统 v0.6.0）
+
+- **EventBus**：同步 / 异步发布订阅，fnmatch 通配符匹配，一次性订阅，事件历史，全局总线单例
+- **EventType**：15 种标准事件 — before/after LLM call、before/after tool call、memory_updated、skill_loaded、agent_spawned、error 等
+
 ### Evolution（自进化）
 
 - **LearningEngine**：从交互记录中提取行为模式，更新策略
@@ -469,8 +497,12 @@ suyi/
 │   ├── web/                 # HTTP API 服务器
 │   ├── persistence/         # 会话持久化 (JSON)
 │   ├── streaming/           # 流式输出处理器
+│   ├── rag/                 # RAG 管道 (文档分块/检索/增强)
+│   ├── cache/               # 缓存层 (精确+语义 LRU)
+│   ├── workflow/            # 工作流引擎 (DAG/并行/重试)
+│   ├── events/              # 事件系统 (发布订阅/通配符)
 │   └── utils/               # 工具函数
-├── tests/                   # 测试套件 (425 个测试)
+├── tests/                   # 测试套件 (1410 个测试)
 ├── examples/                # 示例代码
 ├── data/                    # 数据目录
 ├── pyproject.toml           # 打包配置
