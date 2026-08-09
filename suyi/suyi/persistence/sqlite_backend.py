@@ -441,6 +441,82 @@ class SQLiteBackend:
             ON evolution_log(created_at)
         """)
 
+        # Phase 14: loop_templates table — stores reusable Loop execution templates
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS loop_templates (
+                id                         TEXT PRIMARY KEY,
+                task_signature             TEXT NOT NULL,
+                task_description           TEXT,
+                phases_json                TEXT,
+                tools_json                 TEXT,
+                tool_order_json            TEXT,
+                reflection_points_json     TEXT,
+                max_iterations             INTEGER,
+                termination_conditions_json TEXT,
+                success_count              INTEGER DEFAULT 0,
+                failure_count              INTEGER DEFAULT 0,
+                success_rate               REAL DEFAULT 0.0,
+                avg_iterations             REAL DEFAULT 0.0,
+                avg_cost                   REAL DEFAULT 0.0,
+                source_quality             TEXT,
+                result_quality             TEXT,
+                confidence                 REAL DEFAULT 0.5,
+                evidence_count             INTEGER DEFAULT 0,
+                contradiction_count        INTEGER DEFAULT 0,
+                created_at                 TEXT NOT NULL,
+                last_used                  TEXT NOT NULL,
+                use_count                  INTEGER DEFAULT 0,
+                parent_id                  TEXT,
+                mutations_json             TEXT,
+                variants_json              TEXT,
+                is_active                  INTEGER DEFAULT 1
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_loop_templates_signature
+            ON loop_templates(task_signature)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_loop_templates_active
+            ON loop_templates(is_active)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_loop_templates_parent
+            ON loop_templates(parent_id)
+        """)
+
+        # Phase 14: loop_templates_fts — FTS5 full-text search for templates
+        # Standalone FTS table (same pattern as kv_store_fts), manually
+        # maintained.  Falls back to LIKE when FTS5 is unavailable.
+        self._loop_fts_available = True
+        try:
+            conn.execute("""
+                CREATE VIRTUAL TABLE IF NOT EXISTS loop_templates_fts
+                USING fts5(
+                    task_signature,
+                    task_description,
+                    template_id UNINDEXED
+                )
+            """)
+        except sqlite3.OperationalError:
+            # FTS5不可用 — 降级为普通表 + LIKE
+            self._loop_fts_available = False
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS loop_templates_fts (
+                    task_signature   TEXT,
+                    task_description TEXT,
+                    template_id      TEXT
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_loop_templates_fts_sig
+                ON loop_templates_fts(task_signature)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_loop_templates_fts_desc
+                ON loop_templates_fts(task_description)
+            """)
+
         conn.commit()
 
     # ------------------------------------------------------------------
@@ -1058,6 +1134,371 @@ class SQLiteBackend:
             params,
         ).fetchall()
         return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    #  Phase 14: Loop Template Storage
+    # ------------------------------------------------------------------
+
+    def save_loop_template(self, template_data: Dict[str, Any]) -> None:
+        """Insert or update a loop template record.
+
+        Expects a dict with at least ``id``, ``task_signature``,
+        and ``task_description`` keys.  List fields (``phases``,
+        ``tools``, ``tool_order``, ``reflection_points``,
+        ``termination_conditions``) should already be JSON-serialised
+        or will be serialised by this method.
+
+        Args:
+            template_data: Dict containing all template fields.
+        """
+        now = _iso_timestamp()
+        tid = template_data["id"]
+
+        # Serialise list fields if not already strings
+        def _ensure_json(value: Any, key: str) -> str:
+            if isinstance(value, str):
+                return value
+            return json.dumps(value, ensure_ascii=False)
+
+        phases_json = _ensure_json(
+            template_data.get("phases_json") or template_data.get("phases", []),
+            "phases",
+        )
+        tools_json = _ensure_json(
+            template_data.get("tools_json") or template_data.get("tools", []),
+            "tools",
+        )
+        tool_order_json = _ensure_json(
+            template_data.get("tool_order_json") or template_data.get("tool_order", []),
+            "tool_order",
+        )
+        reflection_points_json = _ensure_json(
+            template_data.get("reflection_points_json")
+            or template_data.get("reflection_points", []),
+            "reflection_points",
+        )
+        termination_conditions_json = _ensure_json(
+            template_data.get("termination_conditions_json")
+            or template_data.get("termination_conditions", []),
+            "termination_conditions",
+        )
+
+        # Quality fields
+        quality = template_data.get("quality")
+        source_quality = template_data.get("source_quality")
+        result_quality = template_data.get("result_quality")
+        confidence = template_data.get("confidence", 0.5)
+        evidence_count = template_data.get("evidence_count", 0)
+        contradiction_count = template_data.get("contradiction_count", 0)
+
+        if quality and isinstance(quality, dict):
+            # The 'quality' dict takes priority over flattened fields
+            q_source = quality.get("source")
+            q_result = quality.get("result")
+            source_quality = q_source if q_source else (source_quality or "C")
+            result_quality = q_result if q_result else (result_quality or "SPECULATIVE")
+            confidence = quality.get("confidence", confidence)
+            evidence_count = quality.get("evidence_count", evidence_count)
+            contradiction_count = quality.get(
+                "contradiction_count", contradiction_count,
+            )
+
+        with self._write_lock:
+            conn = self._get_conn()
+
+            # Preserve created_at if updating existing record
+            existing = conn.execute(
+                "SELECT created_at FROM loop_templates WHERE id = ?",
+                (tid,),
+            ).fetchone()
+            created_at = existing["created_at"] if existing else now
+            last_used = template_data.get("last_used", now)
+
+            conn.execute(
+                """INSERT OR REPLACE INTO loop_templates
+                   (id, task_signature, task_description,
+                    phases_json, tools_json, tool_order_json,
+                    reflection_points_json, max_iterations,
+                    termination_conditions_json,
+                    success_count, failure_count, success_rate,
+                    avg_iterations, avg_cost,
+                    source_quality, result_quality,
+                    confidence, evidence_count, contradiction_count,
+                    created_at, last_used, use_count,
+                    parent_id, mutations_json, variants_json, is_active)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    tid,
+                    template_data.get("task_signature", ""),
+                    template_data.get("task_description", ""),
+                    phases_json,
+                    tools_json,
+                    tool_order_json,
+                    reflection_points_json,
+                    template_data.get("max_iterations", 10),
+                    termination_conditions_json,
+                    template_data.get("success_count", 0),
+                    template_data.get("failure_count", 0),
+                    template_data.get("success_rate", 0.0),
+                    template_data.get("avg_iterations", 0.0),
+                    template_data.get("avg_cost", 0.0),
+                    source_quality,
+                    result_quality,
+                    confidence,
+                    evidence_count,
+                    contradiction_count,
+                    created_at,
+                    last_used,
+                    template_data.get("use_count", 0),
+                    template_data.get("parent_id"),
+                    _ensure_json(
+                        template_data.get("mutations_json")
+                        or template_data.get("mutations", []),
+                        "mutations",
+                    ),
+                    _ensure_json(
+                        template_data.get("variants_json")
+                        or template_data.get("variants", []),
+                        "variants",
+                    ),
+                    int(template_data.get("is_active", True)),
+                ),
+            )
+
+            # Update FTS index for loop templates
+            conn.execute(
+                "DELETE FROM loop_templates_fts WHERE template_id = ?",
+                (tid,),
+            )
+            conn.execute(
+                """INSERT INTO loop_templates_fts
+                   (task_signature, task_description, template_id)
+                   VALUES (?, ?, ?)""",
+                (
+                    template_data.get("task_signature", ""),
+                    template_data.get("task_description", ""),
+                    tid,
+                ),
+            )
+            self._maybe_commit()
+
+    def get_loop_template(self, template_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieve a loop template by ID.
+
+        Args:
+            template_id: The template's unique ID.
+
+        Returns:
+            A dict with all template fields (JSON fields deserialised),
+            or ``None`` if not found.
+        """
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT * FROM loop_templates WHERE id = ?",
+            (template_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._row_to_loop_template(row)
+
+    def search_loop_templates(
+        self,
+        query: str,
+        limit: int = 10,
+    ) -> List[Dict[str, Any]]:
+        """Full-text search for loop templates.
+
+        Searches across ``task_signature`` and ``task_description``
+        using FTS5 (or LIKE fallback).  Only active templates are
+        returned.
+
+        Args:
+            query: Search query string.
+            limit: Maximum number of results.
+
+        Returns:
+            List of template dicts, best matches first.
+        """
+        if not query or not query.strip():
+            return []
+
+        conn = self._get_conn()
+        results: List[Dict[str, Any]] = []
+
+        if self._loop_fts_available:
+            safe_query = self._escape_fts_query(query)
+            if safe_query:
+                try:
+                    rows = conn.execute(
+                        """SELECT lt.*,
+                                  bm25(loop_templates_fts) AS score
+                           FROM loop_templates_fts f
+                           JOIN loop_templates lt ON lt.id = f.template_id
+                           WHERE loop_templates_fts MATCH ?
+                             AND lt.is_active = 1
+                           ORDER BY score ASC
+                           LIMIT ?""",
+                        (safe_query, limit),
+                    ).fetchall()
+                    for row in rows:
+                        tpl = self._row_to_loop_template(row)
+                        tpl["search_score"] = -row["score"] if row["score"] < 0 else row["score"]
+                        results.append(tpl)
+                except sqlite3.OperationalError:
+                    results = []  # fall through to LIKE
+
+        if not results:
+            # LIKE fallback (also used when FTS5 is unavailable)
+            like_pattern = f"%{query}%"
+            rows = conn.execute(
+                """SELECT * FROM loop_templates
+                   WHERE (task_signature LIKE ? OR task_description LIKE ?)
+                     AND is_active = 1
+                   LIMIT ?""",
+                (like_pattern, like_pattern, limit),
+            ).fetchall()
+            for row in rows:
+                results.append(self._row_to_loop_template(row))
+
+        return results
+
+    def update_loop_template_stats(
+        self,
+        template_id: str,
+        success: bool,
+        iterations: int,
+        cost: float,
+    ) -> None:
+        """Update usage statistics for a loop template.
+
+        Increments success/failure count, updates success_rate,
+        avg_iterations, avg_cost, use_count, and last_used timestamp.
+
+        Args:
+            template_id: The template's unique ID.
+            success:     Whether the template usage was successful.
+            iterations:  Number of iterations used.
+            cost:        Cost incurred.
+        """
+        now = _iso_timestamp()
+        with self._write_lock:
+            conn = self._get_conn()
+            row = conn.execute(
+                """SELECT success_count, failure_count, avg_iterations,
+                          avg_cost, use_count
+                   FROM loop_templates WHERE id = ?""",
+                (template_id,),
+            ).fetchone()
+            if row is None:
+                return
+
+            old_success = row["success_count"]
+            old_failure = row["failure_count"]
+            old_avg_iter = row["avg_iterations"]
+            old_avg_cost = row["avg_cost"]
+            old_use = row["use_count"]
+
+            new_success = old_success + (1 if success else 0)
+            new_failure = old_failure + (0 if success else 1)
+            total = new_success + new_failure
+            new_rate = new_success / total if total > 0 else 0.0
+
+            new_use = old_use + 1
+            # Running average: (old_avg * old_n + new_value) / new_n
+            new_avg_iter = (old_avg_iter * old_use + iterations) / new_use
+            new_avg_cost = (old_avg_cost * old_use + cost) / new_use
+
+            conn.execute(
+                """UPDATE loop_templates
+                   SET success_count = ?, failure_count = ?,
+                       success_rate = ?, avg_iterations = ?,
+                       avg_cost = ?, use_count = ?, last_used = ?
+                   WHERE id = ?""",
+                (
+                    new_success, new_failure, new_rate,
+                    new_avg_iter, new_avg_cost, new_use, now,
+                    template_id,
+                ),
+            )
+            self._maybe_commit()
+
+    def list_loop_templates(
+        self,
+        task_signature: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """List loop templates, optionally filtered by task signature.
+
+        Only active templates are returned by default.  Results are
+        ordered by success_rate descending, then use_count descending.
+
+        Args:
+            task_signature: Optional filter — if provided, only
+                templates with an exact match are returned.
+
+        Returns:
+            List of template dicts.
+        """
+        conn = self._get_conn()
+        if task_signature is not None:
+            rows = conn.execute(
+                """SELECT * FROM loop_templates
+                   WHERE task_signature = ? AND is_active = 1
+                   ORDER BY success_rate DESC, use_count DESC""",
+                (task_signature,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """SELECT * FROM loop_templates
+                   WHERE is_active = 1
+                   ORDER BY success_rate DESC, use_count DESC""",
+            ).fetchall()
+        return [self._row_to_loop_template(r) for r in rows]
+
+    def deactivate_loop_template(self, template_id: str) -> bool:
+        """Deactivate a loop template (soft delete).
+
+        Args:
+            template_id: The template's unique ID.
+
+        Returns:
+            ``True`` if the template was found and deactivated.
+        """
+        with self._write_lock:
+            conn = self._get_conn()
+            cursor = conn.execute(
+                "UPDATE loop_templates SET is_active = 0 WHERE id = ?",
+                (template_id,),
+            )
+            self._maybe_commit()
+            return cursor.rowcount > 0
+
+    @staticmethod
+    def _row_to_loop_template(row: sqlite3.Row) -> Dict[str, Any]:
+        """Convert a database row to a deserialised template dict."""
+        result = dict(row)
+        # Deserialise JSON fields
+        for json_field in (
+            "phases_json",
+            "tools_json",
+            "tool_order_json",
+            "reflection_points_json",
+            "termination_conditions_json",
+            "mutations_json",
+            "variants_json",
+        ):
+            raw = result.get(json_field)
+            if raw is None:
+                result[json_field] = []
+            elif isinstance(raw, str):
+                try:
+                    result[json_field] = json.loads(raw)
+                except (json.JSONDecodeError, TypeError):
+                    result[json_field] = []
+            else:
+                result[json_field] = raw
+        # Convert is_active from int to bool
+        result["is_active"] = bool(result.get("is_active", 1))
+        return result
 
     # ------------------------------------------------------------------
     #  生命周期

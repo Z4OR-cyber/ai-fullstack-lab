@@ -1,12 +1,14 @@
 """
-Suyi Quality Module — quality grading, forgetting engine, and anti-pattern memory.
+Suyi Quality Module — quality grading, forgetting engine, anti-pattern
+memory, and loop template memory.
 
-This package implements Phase 13 of the ALA (Adaptive Loop Architecture)
-self-evolution system:
+This package implements Phases 13–14 of the ALA (Adaptive Loop
+Architecture) self-evolution system:
 
-- :mod:`grader`       — Source/result quality grading (S–D scale).
-- :mod:`forgetting`   — Exponential forgetting curve and engine.
-- :mod:`anti_pattern` — Failure pattern storage (反面记忆).
+- :mod:`grader`        — Source/result quality grading (S–D scale).
+- :mod:`forgetting`    — Exponential forgetting curve and engine.
+- :mod:`anti_pattern`  — Failure pattern storage (反面记忆).
+- :mod:`loop_template` — Reusable Loop execution templates (Phase 14).
 
 Usage::
 
@@ -14,6 +16,7 @@ Usage::
         SourceQuality, ResultQuality, QualityScore, QualityAssessor,
         ForgettingCurve, ForgettingAction, ForgettingEngine, MemoryRecord,
         AntiPattern, AntiPatternStore, compute_signature,
+        LoopPhase, LoopTemplate, LoopTemplateStore, DefaultTemplates,
     )
 
     # Grade a memory
@@ -56,6 +59,13 @@ from .anti_pattern import (
     AntiPatternStore,
     compute_signature,
 )
+from .loop_template import (
+    LoopPhase,
+    LoopTemplate,
+    LoopTemplateStore,
+    DefaultTemplates,
+    compute_task_signature,
+)
 
 __all__ = [
     # Grader
@@ -76,4 +86,10 @@ __all__ = [
     "AntiPattern",
     "AntiPatternStore",
     "compute_signature",
+    # Loop template (Phase 14)
+    "LoopPhase",
+    "LoopTemplate",
+    "LoopTemplateStore",
+    "DefaultTemplates",
+    "compute_task_signature",
 ]
