@@ -379,6 +379,68 @@ class SQLiteBackend:
                 CREATE INDEX IF NOT EXISTS idx_{self.fts_table}_content
                 ON {self.fts_table}(content)
             """)
+        # Phase 13: memory_quality table — stores quality scores for memories
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS memory_quality (
+                memory_id           TEXT PRIMARY KEY,
+                source              TEXT NOT NULL DEFAULT 'C',
+                result              TEXT NOT NULL DEFAULT 'SPECULATIVE',
+                confidence          REAL NOT NULL DEFAULT 0.5,
+                evidence_count      INTEGER NOT NULL DEFAULT 0,
+                contradiction_count INTEGER NOT NULL DEFAULT 0,
+                memory_weight       REAL NOT NULL DEFAULT 0.5,
+                decay_tau_days      REAL,
+                is_anti_pattern     INTEGER NOT NULL DEFAULT 0,
+                reinforcement_count INTEGER NOT NULL DEFAULT 0,
+                contradiction_total INTEGER NOT NULL DEFAULT 0,
+                reference_count     INTEGER NOT NULL DEFAULT 0,
+                last_reinforced     TEXT,
+                is_user_pinned      INTEGER NOT NULL DEFAULT 0,
+                created_at          TEXT NOT NULL,
+                updated_at          TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_memory_quality_source
+            ON memory_quality(source)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_memory_quality_result
+            ON memory_quality(result)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_memory_quality_weight
+            ON memory_quality(memory_weight)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_memory_quality_anti
+            ON memory_quality(is_anti_pattern)
+        """)
+
+        # Phase 13: evolution_log table — tracks quality/forgetting events
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS evolution_log (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_type  TEXT NOT NULL,
+                memory_id   TEXT,
+                action      TEXT,
+                details     TEXT,
+                created_at  TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_evolution_log_event
+            ON evolution_log(event_type)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_evolution_log_memory
+            ON evolution_log(memory_id)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_evolution_log_created
+            ON evolution_log(created_at)
+        """)
+
         conn.commit()
 
     # ------------------------------------------------------------------
@@ -732,6 +794,270 @@ class SQLiteBackend:
             f"INSERT INTO {self.fts_table} (content, key) VALUES (?, ?)",
             (text, key),
         )
+
+    # ------------------------------------------------------------------
+    #  Phase 13: Memory Quality & Evolution Log
+    # ------------------------------------------------------------------
+
+    def upsert_memory_quality(
+        self,
+        memory_id: str,
+        source: str = "C",
+        result: str = "SPECULATIVE",
+        confidence: float = 0.5,
+        evidence_count: int = 0,
+        contradiction_count: int = 0,
+        memory_weight: float = 0.5,
+        decay_tau_days: Optional[float] = None,
+        is_anti_pattern: bool = False,
+        reinforcement_count: int = 0,
+        contradiction_total: int = 0,
+        reference_count: int = 0,
+        last_reinforced: Optional[str] = None,
+        is_user_pinned: bool = False,
+    ) -> None:
+        """Insert or update a memory quality record.
+
+        Args:
+            memory_id:           The memory's unique ID.
+            source:              Source quality grade letter (S/A/B/C/D).
+            result:              Result quality name (VERIFIED/TRUSTED/
+                                 SPECULATIVE/FAILED).
+            confidence:          Confidence in [0, 1].
+            evidence_count:      Supporting evidence count.
+            contradiction_count: Contradicting evidence count.
+            memory_weight:       Computed memory weight [0, 1].
+            decay_tau_days:      Decay time-constant in days (None = inf).
+            is_anti_pattern:     Whether this is an anti-pattern memory.
+            reinforcement_count: Times the memory was reinforced.
+            contradiction_total: Total contradictions encountered.
+            reference_count:     Times the memory was referenced.
+            last_reinforced:     ISO timestamp of last reinforcement.
+            is_user_pinned:      Whether the user pinned this memory.
+        """
+        now = _iso_timestamp()
+        with self._write_lock:
+            conn = self._get_conn()
+            conn.execute(
+                """INSERT OR REPLACE INTO memory_quality
+                   (memory_id, source, result, confidence, evidence_count,
+                    contradiction_count, memory_weight, decay_tau_days,
+                    is_anti_pattern, reinforcement_count, contradiction_total,
+                    reference_count, last_reinforced, is_user_pinned,
+                    created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    memory_id, source, result, confidence,
+                    evidence_count, contradiction_count, memory_weight,
+                    decay_tau_days, int(is_anti_pattern),
+                    reinforcement_count, contradiction_total,
+                    reference_count, last_reinforced, int(is_user_pinned),
+                    now, now,
+                ),
+            )
+            self._maybe_commit()
+
+    def get_memory_quality(self, memory_id: str) -> Optional[Dict[str, Any]]:
+        """Retrieve the quality record for a memory.
+
+        Args:
+            memory_id: The memory's unique ID.
+
+        Returns:
+            A dict with quality fields, or ``None`` if not found.
+        """
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT * FROM memory_quality WHERE memory_id = ?",
+            (memory_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return dict(row)
+
+    def delete_memory_quality(self, memory_id: str) -> bool:
+        """Delete a memory quality record.
+
+        Args:
+            memory_id: The memory's unique ID.
+
+        Returns:
+            ``True`` if a record was deleted.
+        """
+        with self._write_lock:
+            conn = self._get_conn()
+            cursor = conn.execute(
+                "DELETE FROM memory_quality WHERE memory_id = ?",
+                (memory_id,),
+            )
+            self._maybe_commit()
+            return cursor.rowcount > 0
+
+    def query_memory_quality(
+        self,
+        source: Optional[str] = None,
+        result: Optional[str] = None,
+        is_anti_pattern: Optional[bool] = None,
+        min_weight: Optional[float] = None,
+        max_weight: Optional[float] = None,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """Query memory quality records with optional filters.
+
+        Args:
+            source:           Filter by source grade (S/A/B/C/D).
+            result:           Filter by result quality name.
+            is_anti_pattern:  Filter by anti-pattern flag.
+            min_weight:       Minimum memory weight.
+            max_weight:       Maximum memory weight.
+            limit:            Maximum number of results.
+
+        Returns:
+            List of quality record dicts.
+        """
+        clauses: List[str] = []
+        params: List[Any] = []
+        if source is not None:
+            clauses.append("source = ?")
+            params.append(source)
+        if result is not None:
+            clauses.append("result = ?")
+            params.append(result)
+        if is_anti_pattern is not None:
+            clauses.append("is_anti_pattern = ?")
+            params.append(int(is_anti_pattern))
+        if min_weight is not None:
+            clauses.append("memory_weight >= ?")
+            params.append(min_weight)
+        if max_weight is not None:
+            clauses.append("memory_weight <= ?")
+            params.append(max_weight)
+
+        where_clause = " AND ".join(clauses) if clauses else "1=1"
+        params.append(limit)
+
+        conn = self._get_conn()
+        rows = conn.execute(
+            f"""SELECT * FROM memory_quality
+                WHERE {where_clause}
+                ORDER BY memory_weight DESC
+                LIMIT ?""",
+            params,
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def log_evolution_event(
+        self,
+        event_type: str,
+        memory_id: Optional[str] = None,
+        action: Optional[str] = None,
+        details: Optional[str] = None,
+    ) -> int:
+        """Record an evolution event in the evolution_log table.
+
+        Args:
+            event_type: Type of event (e.g. 'quality_update',
+                        'forget', 'compress', 'anti_pattern_register').
+            memory_id:  ID of the affected memory.
+            action:     Action taken (e.g. 'DEGRADE', 'PURGE').
+            details:    JSON string with additional context.
+
+        Returns:
+            The row ID of the inserted log entry.
+        """
+        now = _iso_timestamp()
+        with self._write_lock:
+            conn = self._get_conn()
+            cursor = conn.execute(
+                """INSERT INTO evolution_log
+                   (event_type, memory_id, action, details, created_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (event_type, memory_id, action, details, now),
+            )
+            self._maybe_commit()
+            return cursor.lastrowid
+
+    def query_evolution_log(
+        self,
+        event_type: Optional[str] = None,
+        memory_id: Optional[str] = None,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """Query the evolution log with optional filters.
+
+        Args:
+            event_type: Filter by event type.
+            memory_id:  Filter by memory ID.
+            limit:      Maximum number of results.
+
+        Returns:
+            List of log entry dicts, newest first.
+        """
+        clauses: List[str] = []
+        params: List[Any] = []
+        if event_type is not None:
+            clauses.append("event_type = ?")
+            params.append(event_type)
+        if memory_id is not None:
+            clauses.append("memory_id = ?")
+            params.append(memory_id)
+
+        where_clause = " AND ".join(clauses) if clauses else "1=1"
+        params.append(limit)
+
+        conn = self._get_conn()
+        rows = conn.execute(
+            f"""SELECT * FROM evolution_log
+                WHERE {where_clause}
+                ORDER BY created_at DESC, id DESC
+                LIMIT ?""",
+            params,
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def query_anti_patterns(
+        self,
+        include_resolved: bool = False,
+        min_severity: Optional[float] = None,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """Query anti-pattern memory records.
+
+        Anti-patterns are stored as memory_quality records with
+        ``is_anti_pattern = 1`` and ``result = 'FAILED'``.
+
+        Args:
+            include_resolved: Whether to include resolved patterns.
+            min_severity:     Minimum severity threshold.
+            limit:            Maximum number of results.
+
+        Returns:
+            List of anti-pattern record dicts.
+        """
+        clauses: List[str] = ["is_anti_pattern = 1"]
+        params: List[Any] = []
+        if not include_resolved:
+            # Resolved patterns have is_user_pinned = 0 and
+            # confidence > 0.5 (lowered severity). We approximate
+            # "unresolved" as confidence <= 0.5.
+            clauses.append("confidence <= 0.5")
+        if min_severity is not None:
+            # Severity is inversely related to confidence for anti-patterns
+            clauses.append("(1.0 - confidence) >= ?")
+            params.append(min_severity)
+
+        where_clause = " AND ".join(clauses)
+        params.append(limit)
+
+        conn = self._get_conn()
+        rows = conn.execute(
+            f"""SELECT * FROM memory_quality
+                WHERE {where_clause}
+                ORDER BY confidence ASC, memory_weight DESC
+                LIMIT ?""",
+            params,
+        ).fetchall()
+        return [dict(r) for r in rows]
 
     # ------------------------------------------------------------------
     #  生命周期
