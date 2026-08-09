@@ -37,6 +37,7 @@ from .schema import (
     MiddlewareConfig,
     AgentConfig,
     EvolutionConfig,
+    PersistenceConfig,
 )
 from .loader import (
     load_config,
@@ -54,6 +55,7 @@ __all__ = [
     "MiddlewareConfig",
     "AgentConfig",
     "EvolutionConfig",
+    "PersistenceConfig",
     # Loader
     "load_config",
     "load_config_from_dict",

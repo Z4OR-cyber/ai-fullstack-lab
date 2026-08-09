@@ -41,6 +41,7 @@ from .schema import (
     MiddlewareConfig,
     AgentConfig,
     EvolutionConfig,
+    PersistenceConfig,
 )
 
 
@@ -142,6 +143,13 @@ def _build_evolution_config(d: dict[str, Any]) -> EvolutionConfig:
     return EvolutionConfig(**filtered)
 
 
+def _build_persistence_config(d: dict[str, Any]) -> PersistenceConfig:
+    """Build PersistenceConfig from dict."""
+    known_fields = {"backend", "storage_dir", "db_path", "namespace"}
+    filtered = {k: v for k, v in d.items() if k in known_fields}
+    return PersistenceConfig(**filtered)
+
+
 # ═══════════════════════════════════════════════════════════════
 #  Public API
 # ═══════════════════════════════════════════════════════════════
@@ -178,6 +186,9 @@ def load_config_from_dict(d: dict[str, Any]) -> SuyiConfig:
 
     if "evolution" in d and isinstance(d["evolution"], dict):
         config.evolution = _build_evolution_config(d["evolution"])
+
+    if "persistence" in d and isinstance(d["persistence"], dict):
+        config.persistence = _build_persistence_config(d["persistence"])
 
     return config
 

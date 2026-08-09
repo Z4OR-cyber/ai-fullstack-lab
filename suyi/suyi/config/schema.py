@@ -216,6 +216,29 @@ class EvolutionConfig:
 
 
 # ═══════════════════════════════════════════════════════════════
+#  Persistence Config
+# ═══════════════════════════════════════════════════════════════
+
+
+@dataclass
+class PersistenceConfig:
+    """
+    持久化后端配置。
+
+    Attributes:
+        backend:     后端类型，``"json"`` 或 ``"sqlite"``。
+        storage_dir: JSON后端的存储根目录。
+        db_path:     SQLite后端的数据库文件路径。
+        namespace:   JSON后端的命名空间子目录。
+    """
+
+    backend: str = "json"
+    storage_dir: str = "./data"
+    db_path: str = "./data/suyi.db"
+    namespace: str = "default"
+
+
+# ═══════════════════════════════════════════════════════════════
 #  Top-Level Config
 # ═══════════════════════════════════════════════════════════════
 
@@ -242,6 +265,7 @@ class SuyiConfig:
     middleware: MiddlewareConfig = field(default_factory=MiddlewareConfig)
     agent: AgentConfig = field(default_factory=AgentConfig)
     evolution: EvolutionConfig = field(default_factory=EvolutionConfig)
+    persistence: "PersistenceConfig" = field(default_factory=PersistenceConfig)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert config to a plain dict (for serialization)."""
@@ -279,5 +303,11 @@ class SuyiConfig:
             "evolution": {
                 "learning_enabled": self.evolution.learning_enabled,
                 "eval_interval": self.evolution.eval_interval,
+            },
+            "persistence": {
+                "backend": self.persistence.backend,
+                "storage_dir": self.persistence.storage_dir,
+                "db_path": self.persistence.db_path,
+                "namespace": self.persistence.namespace,
             },
         }
