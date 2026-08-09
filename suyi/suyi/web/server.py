@@ -45,6 +45,7 @@ from ..core.context import ContextAssembler, IdentityConfig
 from ..memory import MemoryManager
 from ..persistence import SessionManager
 from ..skills import SkillLoader
+from .auth import AuthConfig, AuthManager
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -67,6 +68,9 @@ class SuyiServer:
         system_prompt:   System prompt for the agent loop.
         host:            Bind address (default ``0.0.0.0``).
         port:            Bind port (default ``8080``).
+        auth_config:     Optional AuthConfig for authentication & CORS.
+                         If not provided, a default config is used
+                         (auth_enabled=True but no credentials → not active).
     """
 
     def __init__(
@@ -79,6 +83,7 @@ class SuyiServer:
         system_prompt: str = "",
         host: str = "0.0.0.0",
         port: int = 8080,
+        auth_config: Optional[AuthConfig] = None,
     ) -> None:
         self.llm = llm or MockLLM([LLMResponse.text("Hello from Suyi!")])
         self.tools: dict[str, Tool] = {t.name: t for t in (tools or [])}
@@ -88,6 +93,10 @@ class SuyiServer:
         self.system_prompt = system_prompt
         self.host = host
         self.port = port
+
+        # 认证与安全
+        self.auth_config: AuthConfig = auth_config or AuthConfig()
+        self.auth_manager: AuthManager = AuthManager(self.auth_config)
 
         self._httpd: Optional[ThreadingHTTPServer] = None
         self._thread: Optional[threading.Thread] = None
@@ -101,23 +110,41 @@ class SuyiServer:
         method: str,
         path: str,
         body: Optional[dict] = None,
+        headers: Optional[dict[str, str]] = None,
     ) -> tuple[int, dict[str, Any]]:
         """
         Process a single request.
 
         Args:
-            method: HTTP method (``"GET"`` or ``"POST"``).
-            path:   Request path (e.g. ``"/chat"``).
-            body:   Parsed JSON body for POST requests.
+            method:  HTTP method (``"GET"`` or ``"POST"``).
+            path:    Request path (e.g. ``"/chat"``).
+            body:    Parsed JSON body for POST requests.
+            headers: Request headers dict (for authentication).
+                     If not provided, auth check is skipped when
+                     no credentials are configured.
 
         Returns:
             A ``(status_code, response_dict)`` tuple.
         """
         body = body or {}
+        headers = headers or {}
+
+        # ── 认证检查 ──────────────────────────────────────────
+        # 仅在认证生效且路径不豁免时检查
+        if (
+            self.auth_manager.is_auth_active()
+            and not self.auth_manager.is_exempt(method, path)
+        ):
+            allowed, error = self.auth_manager.authenticate(headers)
+            if not allowed:
+                return 401, error
 
         # ── Route ───────────────────────────────────────────────
         if path == "/health" and method == "GET":
             return 200, {"status": "ok", "service": "suyi"}
+
+        if path == "/auth/token" and method == "POST":
+            return self.auth_manager.create_token_response(headers, body)
 
         if path == "/chat" and method == "POST":
             return await self._handle_chat(body)
@@ -255,10 +282,16 @@ class SuyiServer:
                 # Suppress default logging
                 pass
 
+            def _headers_to_dict(self) -> dict[str, str]:
+                """将 HTTP 请求头转为普通字典（供认证检查使用）."""
+                return {k: v for k, v in self.headers.items()}
+
             def _set_cors_headers(self) -> None:
-                self.send_header("Access-Control-Allow-Origin", "*")
-                self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-                self.send_header("Access-Control-Allow-Headers", "Content-Type")
+                """设置可配置的 CORS 响应头."""
+                origin = self.headers.get("Origin")
+                cors_headers = server_ref.auth_manager.get_cors_headers(origin)
+                for key, value in cors_headers.items():
+                    self.send_header(key, value)
 
             def _send_json(self, status: int, payload: dict) -> None:
                 body_bytes = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -280,20 +313,23 @@ class SuyiServer:
                     return {}
 
             def do_OPTIONS(self) -> None:  # noqa: N802
+                """处理 CORS 预检请求."""
                 self.send_response(204)
                 self._set_cors_headers()
                 self.end_headers()
 
             def do_GET(self) -> None:  # noqa: N802
+                req_headers = self._headers_to_dict()
                 status, payload = asyncio.run(
-                    server_ref.handle_request("GET", self.path)
+                    server_ref.handle_request("GET", self.path, headers=req_headers)
                 )
                 self._send_json(status, payload)
 
             def do_POST(self) -> None:  # noqa: N802
                 body = self._read_body()
+                req_headers = self._headers_to_dict()
                 status, payload = asyncio.run(
-                    server_ref.handle_request("POST", self.path, body)
+                    server_ref.handle_request("POST", self.path, body, req_headers)
                 )
                 self._send_json(status, payload)
 
