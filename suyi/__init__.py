@@ -34,7 +34,7 @@ Quick start:
     result = await agent.run("Do something")
 """
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"
 
 # Memory
 from .memory import (
@@ -409,6 +409,38 @@ __all__ = [
     "InputProcessor",
     "ProcessResult",
     "FormatConverter",
+    # Phase 12: Rate Limiter
+    "RateLimitConfig",
+    "RateLimitAlgorithm",
+    "RLTokenBucket",
+    "RLSlidingWindow",
+    "DimensionLimiter",
+    "MultiRateLimiter",
+    "RateLimitMiddleware",
+    # Phase 12: State Machine
+    "State",
+    "Transition",
+    "StateHistoryEntry",
+    "TransitionResult",
+    "StateMachineError",
+    "StateNotFoundError",
+    "InvalidTransitionError",
+    "StateNotStartedError",
+    "StateMachine",
+    # Phase 12: Cost Tracker
+    "CostConfig",
+    "CostRecord",
+    "CostAlert",
+    "CostReport",
+    "AlertLevel",
+    "DEFAULT_MODEL_PRICING",
+    "CostTrackerV2",
+    # Phase 12: Feedback Loop
+    "FeedbackType",
+    "ImplicitSignalType",
+    "FeedbackEntry",
+    "FeedbackSignalV2",
+    "FeedbackLoop",
 ]
 
 # Phase 2: Skills
@@ -715,4 +747,48 @@ from .multimodal import (
     InputProcessor,
     ProcessResult,
     FormatConverter,
+)
+
+# Phase 12: Rate Limiter
+from .ratelimit import (
+    RateLimitConfig,
+    RateLimitAlgorithm,
+    TokenBucket as RLTokenBucket,
+    SlidingWindow as RLSlidingWindow,
+    DimensionLimiter,
+    MultiRateLimiter,
+    RateLimitMiddleware,
+)
+
+# Phase 12: State Machine
+from .statemachine import (
+    State,
+    Transition,
+    StateHistoryEntry,
+    TransitionResult,
+    StateMachineError,
+    StateNotFoundError,
+    InvalidTransitionError,
+    StateNotStartedError,
+    StateMachine,
+)
+
+# Phase 12: Cost Tracker
+from .cost import (
+    CostConfig,
+    CostRecord,
+    CostAlert,
+    CostReport,
+    AlertLevel,
+    DEFAULT_MODEL_PRICING,
+    CostTrackerV2,
+)
+
+# Phase 12: Feedback Loop
+from .feedback import (
+    FeedbackType,
+    ImplicitSignalType,
+    FeedbackEntry,
+    FeedbackSignalV2,
+    FeedbackLoop,
 )
