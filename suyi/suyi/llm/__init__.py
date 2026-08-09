@@ -23,6 +23,7 @@ Usage::
 
 from .openai_adapter import OpenAIAdapter
 from .anthropic_adapter import AnthropicAdapter
+from .omniroute_adapter import OmniRouteAdapter
 from .factory import (
     create_llm,
     create_llm_from_config,
@@ -33,6 +34,7 @@ from .factory import (
 __all__ = [
     "OpenAIAdapter",
     "AnthropicAdapter",
+    "OmniRouteAdapter",
     "create_llm",
     "create_llm_from_config",
     "register_provider",

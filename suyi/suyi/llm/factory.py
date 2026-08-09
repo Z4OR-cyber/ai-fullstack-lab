@@ -32,12 +32,14 @@ from typing import Any
 from ..core.loop import LLMInterface
 from .openai_adapter import OpenAIAdapter
 from .anthropic_adapter import AnthropicAdapter
+from .omniroute_adapter import OmniRouteAdapter
 
 
 # Registry of provider → adapter class
 _PROVIDER_REGISTRY: dict[str, type] = {
     "openai": OpenAIAdapter,
     "anthropic": AnthropicAdapter,
+    "omniroute": OmniRouteAdapter,
 }
 
 # Aliases for common OpenAI-compatible providers
@@ -51,6 +53,7 @@ _PROVIDER_ALIASES: dict[str, str] = {
     "ollama": "openai",
     "vllm": "openai",
     "claude": "anthropic",
+    "omni": "omniroute",
 }
 
 
