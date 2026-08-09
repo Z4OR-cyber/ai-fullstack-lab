@@ -34,7 +34,7 @@ Quick start:
     result = await agent.run("Do something")
 """
 
-__version__ = "0.5.0"
+__version__ = "0.8.0"
 
 # Memory
 from .memory import (
@@ -100,6 +100,8 @@ from .tools import (
     SearchTool,
     SkillTool,
     get_builtin_tools,
+    WebRequestTool,
+    CodeSandboxTool,
 )
 
 # Utils
@@ -174,6 +176,8 @@ __all__ = [
     "SearchTool",
     "SkillTool",
     "get_builtin_tools",
+    "WebRequestTool",
+    "CodeSandboxTool",
     # Utils
     "TokenCounter",
     "estimate_tokens",
@@ -330,6 +334,117 @@ __all__ = [
     "get_library",
     "get_template",
     "render_template",
+    # Phase 10: RAG Pipeline
+    "RAGPipeline",
+    "RAGRetriever",
+    "RAGResult",
+    "Chunk",
+    "BaseChunker",
+    "FixedSizeChunker",
+    "SentenceChunker",
+    "SemanticChunker",
+    "get_chunker",
+    # Phase 10: Caching Layer
+    "CacheManager",
+    "CacheStats",
+    "CacheEntry",
+    "ExactCache",
+    "SemanticCache",
+    # Phase 10: Workflow Engine
+    "DAG",
+    "Node",
+    "NodeStatus",
+    "Edge",
+    "DAGValidationError",
+    "WorkflowEngine",
+    "WorkflowResult",
+    "FailurePolicy",
+    # Phase 10: Event System
+    "EventBus",
+    "Subscription",
+    "Event",
+    "EventType",
+    "get_event_bus",
+    "reset_event_bus",
+    "before_llm_call",
+    "after_llm_call",
+    "before_tool_call",
+    "after_tool_call",
+    "memory_updated",
+    "skill_loaded",
+    "agent_spawned",
+    "error_event",
+    # Phase 11: Plugin System
+    "PluginManager",
+    "PluginBase",
+    "PluginContext",
+    "PluginState",
+    "PluginRegistry",
+    "PluginEntry",
+    "load_from_file",
+    "load_from_package",
+    "load_plugin",
+    "PluginLoadError",
+    # Phase 11: Deployment Templates
+    "DeploymentConfig",
+    "Environment",
+    "EnvVar",
+    "HealthCheck",
+    "ResourceLimits",
+    "DockerConfigGenerator",
+    "K8sConfigGenerator",
+    "generate_dockerfile",
+    "generate_compose",
+    "generate_k8s_deployment",
+    "generate_k8s_service",
+    "generate_k8s_ingress",
+    "generate_all_k8s",
+    # Phase 11: Vector Store
+    "VectorStoreBase",
+    "InMemoryVectorStore",
+    "VectorRecord",
+    "SearchResult",
+    "VectorStoreRetrieverAdapter",
+    "RAGVectorStoreAdapter",
+    # Phase 11: Multimodal Support
+    "MultimodalInput",
+    "MediaContent",
+    "ModalityType",
+    "InputProcessor",
+    "ProcessResult",
+    "FormatConverter",
+    # Phase 12: Rate Limiter
+    "RateLimitConfig",
+    "RateLimitAlgorithm",
+    "RLTokenBucket",
+    "RLSlidingWindow",
+    "DimensionLimiter",
+    "MultiRateLimiter",
+    "RateLimitMiddleware",
+    # Phase 12: State Machine
+    "State",
+    "Transition",
+    "StateHistoryEntry",
+    "TransitionResult",
+    "StateMachineError",
+    "StateNotFoundError",
+    "InvalidTransitionError",
+    "StateNotStartedError",
+    "StateMachine",
+    # Phase 12: Cost Tracker
+    "CostConfig",
+    "CostRecord",
+    "CostAlert",
+    "CostReport",
+    "AlertLevel",
+    "DEFAULT_MODEL_PRICING",
+    "CostTrackerV2",
+    # Phase 12: Feedback Loop
+    "FeedbackType",
+    "ImplicitSignalType",
+    "FeedbackEntry",
+    "FeedbackSignalV2",
+    "FeedbackLoop",
 ]
 
 # Phase 2: Skills
@@ -533,4 +648,151 @@ from .prompts import (
     get_library,
     get_template,
     render_template,
+)
+
+# Phase 10: RAG Pipeline
+from .rag import (
+    RAGPipeline,
+    RAGRetriever,
+    RAGResult,
+    Chunk,
+    BaseChunker,
+    FixedSizeChunker,
+    SentenceChunker,
+    SemanticChunker,
+    get_chunker,
+)
+
+# Phase 10: Caching Layer
+from .cache import (
+    CacheManager,
+    CacheStats,
+    CacheEntry,
+    ExactCache,
+    SemanticCache,
+)
+
+# Phase 10: Workflow Engine
+from .workflow import (
+    DAG,
+    Node,
+    NodeStatus,
+    Edge,
+    DAGValidationError,
+    WorkflowEngine,
+    WorkflowResult,
+    FailurePolicy,
+)
+
+# Phase 10: Event System
+from .events import (
+    EventBus,
+    Subscription,
+    Event,
+    EventType,
+    get_event_bus,
+    reset_event_bus,
+    before_llm_call,
+    after_llm_call,
+    before_tool_call,
+    after_tool_call,
+    memory_updated,
+    skill_loaded,
+    agent_spawned,
+    error_event,
+)
+
+# Phase 11: Plugin System
+from .plugins import (
+    PluginManager,
+    PluginBase,
+    PluginContext,
+    PluginState,
+    PluginRegistry,
+    PluginEntry,
+    load_from_file,
+    load_from_package,
+    load_plugin,
+    PluginLoadError,
+)
+
+# Phase 11: Deployment Templates
+from .deploy import (
+    DeploymentConfig,
+    Environment,
+    EnvVar,
+    HealthCheck,
+    ResourceLimits,
+    DockerConfigGenerator,
+    K8sConfigGenerator,
+    generate_dockerfile,
+    generate_compose,
+    generate_k8s_deployment,
+    generate_k8s_service,
+    generate_k8s_ingress,
+    generate_all_k8s,
+)
+
+# Phase 11: Vector Store
+from .vectorstore import (
+    VectorStoreBase,
+    InMemoryVectorStore,
+    VectorRecord,
+    SearchResult,
+    VectorStoreRetrieverAdapter,
+    RAGVectorStoreAdapter,
+)
+
+# Phase 11: Multimodal Support
+from .multimodal import (
+    MultimodalInput,
+    MediaContent,
+    ModalityType,
+    InputProcessor,
+    ProcessResult,
+    FormatConverter,
+)
+
+# Phase 12: Rate Limiter
+from .ratelimit import (
+    RateLimitConfig,
+    RateLimitAlgorithm,
+    TokenBucket as RLTokenBucket,
+    SlidingWindow as RLSlidingWindow,
+    DimensionLimiter,
+    MultiRateLimiter,
+    RateLimitMiddleware,
+)
+
+# Phase 12: State Machine
+from .statemachine import (
+    State,
+    Transition,
+    StateHistoryEntry,
+    TransitionResult,
+    StateMachineError,
+    StateNotFoundError,
+    InvalidTransitionError,
+    StateNotStartedError,
+    StateMachine,
+)
+
+# Phase 12: Cost Tracker
+from .cost import (
+    CostConfig,
+    CostRecord,
+    CostAlert,
+    CostReport,
+    AlertLevel,
+    DEFAULT_MODEL_PRICING,
+    CostTrackerV2,
+)
+
+# Phase 12: Feedback Loop
+from .feedback import (
+    FeedbackType,
+    ImplicitSignalType,
+    FeedbackEntry,
+    FeedbackSignalV2,
+    FeedbackLoop,
 )

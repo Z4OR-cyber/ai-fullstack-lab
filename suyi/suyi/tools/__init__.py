@@ -26,6 +26,8 @@ from .builtin import (
     SkillTool,
     get_builtin_tools,
 )
+from .web_request import WebRequestTool
+from .code_sandbox import CodeSandboxTool
 
 __all__ = [
     # 基类
@@ -48,4 +50,7 @@ __all__ = [
     "SearchTool",
     "SkillTool",
     "get_builtin_tools",
+    # 扩展工具
+    "WebRequestTool",
+    "CodeSandboxTool",
 ]

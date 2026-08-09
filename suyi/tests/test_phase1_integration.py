@@ -163,7 +163,7 @@ class TestIntegration:
 
         # Tools
         tools = get_builtin_tools()
-        assert len(tools) == 5
+        assert len(tools) >= 5
 
         # Context
         ctx = ContextAssembler(

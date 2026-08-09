@@ -376,6 +376,8 @@ class WriteFileTool(AgentTool):
         """
         path = input_data.get("path", "")
         content = input_data.get("content", "")
+        if content is None:
+            content = ""
         append = input_data.get("append", False)
 
         if not path:
@@ -670,10 +672,16 @@ def get_builtin_tools(
     Returns:
         内置工具实例列表.
     """
+    # 延迟导入避免循环依赖
+    from .web_request import WebRequestTool
+    from .code_sandbox import CodeSandboxTool
+
     return [
         BashTool(),
         ReadFileTool(),
         WriteFileTool(),
         SearchTool(search_fn=search_fn),
         SkillTool(skills_dir=skills_dir),
+        WebRequestTool(),
+        CodeSandboxTool(),
     ]
