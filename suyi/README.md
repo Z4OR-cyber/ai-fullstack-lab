@@ -46,6 +46,28 @@ Suyi 是一个纯 Python 实现的自进化 AI Agent 框架，不依赖 PyTorch 
 | **Deploy Templates** | v0.7.0 | 部署模板 — Docker（Dockerfile + docker-compose）+ K8s（Deployment/Service/Ingress）配置生成 |
 | **Vector Store** | v0.7.0 | 向量存储 — 纯 numpy 余弦相似度 + L2 距离 + Top-K 检索 + RAG/Memory 适配器 |
 | **Multimodal** | v0.7.0 | 多模态输入 — 统一容器（text/image/audio/video）+ 格式检测 + base64 编解码 |
+| **Rate Limiting** | v0.8.0 | 令牌桶限流 + 滑动窗口 + 多维度限流策略 |
+| **State Machine** | v0.8.0 | 有限状态机 — 状态转换 / 守卫条件 / 历史追踪 |
+| **Cost Tracker** | v0.8.0 | 多提供商成本追踪 + 预算告警 + 用量统计 |
+| **Feedback Loop** | v0.8.0 | 反馈闭环收集器 — 显式/隐式反馈信号 + 信号聚合 |
+| **OmniRoute Adapter** | v0.9.0 | OmniRoute LLM Gateway 适配器 — 本地 LLM 路由 + 115 模型可用 |
+| **SQLite Persistence** | v0.9.0 | SQLite 持久化层 — FTS5 全文搜索 + 迁移管理 + JSON 后端兼容 |
+| **Real Tools** | v0.9.0 | WebRequestTool（SSRF 防护）+ CodeSandboxTool（安全执行） |
+| **API Auth** | v0.9.0 | JWT + API Key + CORS 认证安全层（纯标准库） |
+| **E2E Integration** | v0.9.0 | 5 条完整链路端到端集成测试 |
+
+**ALA 原创模块（v1.0.0 — Adaptive Loop Architecture）：**
+
+| 模块 | Phase | 说明 |
+|------|-------|------|
+| **Quality Grading** | 13 | 来源分级(S-D) + 结果分级(Verified-Failed) + 加权混合质量评分 + Ebbinghaus 遗忘曲线 |
+| **Forgetting Engine** | 13 | 三级遗忘策略（DEGRADE/COMPRESS/PURGE）+ 安全网（user-pinned 不可删除）+ dry-run 预览 |
+| **Anti-Pattern Memory** | 13 | 失败模式提取 + 反面记忆存储 + 检索优先级提升 + 永不自动删除 |
+| **Loop Template Memory** | 14 | Loop 结构本身作为可复用记忆 — phases/reflection_points/budgets 模板化 + 变异 + A/B 测试 |
+| **Strategy Evolver** | 15 | ProcessReflection 五维反思 + 六种变异策略 + z 检验/Wilson 区间统计显著性验证 |
+| **Bilevel Loop** | 16 | 内层 TaskLoop（业务执行）+ 外层 EvolutionLoop（自我进化）+ 四种触发机制 |
+| **Evolution Report** | 17 | 进化报告生成器 — to_dict/to_markdown/to_json + 8 部分结构化报告 |
+| **E2E Evolution Cycle** | 17 | 12 轮端到端进化循环验证 — 模板积累 + 遗忘压缩 + 策略变异 + A/B 实验 + 反面记忆注册 |
 
 ## 架构总览
 
@@ -443,6 +465,45 @@ skills = generator.generate_from_patterns(patterns)
 - **BehaviorEvaluator**：多维度性能评估 + A/B 版本对比
 - **FeedbackCollector**：显式（赞/踩 + 文本）与隐式反馈信号收集
 
+### ALA — Adaptive Loop Architecture（v1.0.0 原创模块）
+
+ALA 是 Suyi 的核心创新 — 让 Loop 本身成为可进化的记忆，实现"溯（检索模板）→ 忆（存储模板）→ 进化（双层循环）"。
+
+**双层循环架构：**
+```
+┌─────────────────────────────────────────────────────┐
+│              BilevelLoop (顶层协调器)                 │
+│  ┌───────────────────────────────────────────────┐  │
+│  │     TaskLoop (内层 — 业务执行)                  │  │
+│  │  检索最优模板 → 按 phases 执行 → 反思 → 记录   │  │
+│  └──────────────────────┬────────────────────────┘  │
+│                         │ TaskResult                  │
+│  ┌──────────────────────▼────────────────────────┐  │
+│  │   EvolutionLoop (外层 — 自我进化)               │  │
+│  │  过程反思 → 更新模板统计 → 遗忘引擎 →          │  │
+│  │  失败注册反面记忆 → 变异模板 → A/B 实验评估    │  │
+│  └───────────────────────────────────────────────┘  │
+│  触发机制: EVERY_TASK / ACCUMULATED_N /             │
+│           PERFORMANCE_DROP / SCHEDULED               │
+└─────────────────────────────────────────────────────┘
+```
+
+- **QualityGrader**：来源分级(S/D) × 结果分级(Verified→Failed) × 置信度 × 证据比 → 加权混合质量评分
+- **ForgettingEngine**：Ebbinghaus 遗忘曲线 Q(t)=Q₀·e^(-t/τ) + 三级策略（DEGRADE > 0.2 / COMPRESS > 0.05 / PURGE < 0.05）+ 安全网（user-pinned 降级为 DEGRADE）
+- **AntiPatternStore**：失败模式自动提取 + 反面记忆永久存储 + 检索优先级 ≥ 0.5 + `__len__` 支持
+- **LoopTemplateStore**：Loop 结构模板化（phases / reflection_points / budgets / system_prompts）+ 模板变异 + 统计追踪 + SQLite 持久化
+- **StrategyEvolver**：ProcessReflection 五维反思（效率/质量/成本/鲁棒性/创新性）+ 六种变异（PHASE_REORDER / BUDGET_REALLOC / REFLECTION_INSERT / PROMPT_REFINE / TOOL_SWAP / PHASE_MERGE）+ A/B z 检验
+- **BilevelLoop**：内层 TaskLoop 执行业务 + 外层 EvolutionLoop 自我进化 + 四种触发机制 + ConfigurableTaskLoop 测试辅助
+- **EvolutionReportGenerator**：8 部分结构化报告（任务概览 / 模板演化 / 遗忘摘要 / 变异历史 / A/B 结果 / 性能对比 / 关键发现 / 建议）
+
+**原创性声明：**
+- 质量分级：RAGAS 最近，但引入记忆生命周期评分
+- 遗忘引擎：无现有方案，Ebbinghaus 曲线 + 三级策略
+- Loop 模板：CoT 最近，但 Loop 结构本身作为可复用记忆
+- 策略进化器：Reflexion 最近，但修改 Loop 本身（非仅 prompt）
+- 双层循环：Meta AI 概念论文未开源
+- 反面记忆：无现有方案
+
 ### LLM Adapters（LLM 适配器）
 
 - **OpenAIAdapter**：支持 OpenAI / DeepSeek / Moonshot / Together / Groq 等兼容 API
@@ -537,7 +598,13 @@ suyi/
 │   ├── vectorstore/         # 向量存储 (numpy余弦相似度)
 │   ├── multimodal/          # 多模态输入 (text/image/audio/video)
 │   └── utils/               # 工具函数
-├── tests/                   # 测试套件 (1661 个测试)
+│   ├── quality/              # ALA: 质量分级 + 遗忘引擎 + 反面记忆 + Loop模板 + 策略进化器 + 双层循环
+│   ├── ratelimit/            # 限流模块
+│   ├── statemachine/         # 状态机
+│   ├── cost/                 # 成本追踪
+│   ├── feedback/             # 反馈闭环
+│   └── utils/               # 工具函数
+├── tests/                   # 测试套件 (2774 个测试)
 ├── examples/                # 示例代码
 ├── data/                    # 数据目录
 ├── pyproject.toml           # 打包配置
