@@ -517,6 +517,88 @@ class SQLiteBackend:
                 ON loop_templates_fts(task_description)
             """)
 
+        # Phase 15: strategy_experiments table — A/B test experiments
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS strategy_experiments (
+                id                     TEXT PRIMARY KEY,
+                name                   TEXT NOT NULL,
+                control_template_id    TEXT NOT NULL,
+                variant_template_id    TEXT NOT NULL,
+                min_samples            INTEGER DEFAULT 10,
+                status                 TEXT NOT NULL DEFAULT 'running',
+                winner                 TEXT,
+                created_at             TEXT NOT NULL,
+                completed_at           TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_strategy_exp_status
+            ON strategy_experiments(status)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_strategy_exp_control
+            ON strategy_experiments(control_template_id)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_strategy_exp_variant
+            ON strategy_experiments(variant_template_id)
+        """)
+
+        # Phase 15: experiment_results table — individual trial results
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS experiment_results (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                experiment_id  TEXT NOT NULL,
+                template_id    TEXT NOT NULL,
+                success        INTEGER NOT NULL DEFAULT 0,
+                iterations     INTEGER DEFAULT 0,
+                cost           REAL DEFAULT 0.0,
+                created_at     TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_exp_results_exp
+            ON experiment_results(experiment_id)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_exp_results_tpl
+            ON experiment_results(template_id)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_exp_results_exp_tpl
+            ON experiment_results(experiment_id, template_id)
+        """)
+
+        # Phase 15: mutation_history table — tracks template mutations
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS mutation_history (
+                id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+                template_id            TEXT NOT NULL,
+                parent_id              TEXT,
+                mutation_type          TEXT NOT NULL,
+                description            TEXT,
+                rationale              TEXT,
+                expected_improvement   REAL DEFAULT 0.0,
+                reflection_composite   REAL DEFAULT 0.0,
+                target_dimension       TEXT,
+                reflection_details     TEXT,
+                proposal_details       TEXT,
+                created_at             TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_mutation_history_tpl
+            ON mutation_history(template_id)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_mutation_history_parent
+            ON mutation_history(parent_id)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_mutation_history_type
+            ON mutation_history(mutation_type)
+        """)
+
         conn.commit()
 
     # ------------------------------------------------------------------
@@ -1499,6 +1581,278 @@ class SQLiteBackend:
         # Convert is_active from int to bool
         result["is_active"] = bool(result.get("is_active", 1))
         return result
+
+    # ------------------------------------------------------------------
+    #  Phase 15: Strategy Experiments
+    # ------------------------------------------------------------------
+
+    def save_strategy_experiment(self, experiment_data: Dict[str, Any]) -> None:
+        """Insert or update a strategy experiment record.
+
+        Args:
+            experiment_data: Dict with keys: id, name,
+                control_template_id, variant_template_id,
+                min_samples, status, winner, created_at, completed_at.
+        """
+        now = _iso_timestamp()
+        exp_id = experiment_data["id"]
+        with self._write_lock:
+            conn = self._get_conn()
+            existing = conn.execute(
+                "SELECT created_at FROM strategy_experiments WHERE id = ?",
+                (exp_id,),
+            ).fetchone()
+            created_at = existing["created_at"] if existing else (
+                experiment_data.get("created_at") or now
+            )
+            conn.execute(
+                """INSERT OR REPLACE INTO strategy_experiments
+                   (id, name, control_template_id, variant_template_id,
+                    min_samples, status, winner, created_at, completed_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    exp_id,
+                    experiment_data.get("name", ""),
+                    experiment_data.get("control_template_id", ""),
+                    experiment_data.get("variant_template_id", ""),
+                    int(experiment_data.get("min_samples", 10)),
+                    experiment_data.get("status", "running"),
+                    experiment_data.get("winner"),
+                    created_at,
+                    experiment_data.get("completed_at"),
+                ),
+            )
+            self._maybe_commit()
+
+    def get_strategy_experiment(
+        self,
+        experiment_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Retrieve a strategy experiment by ID.
+
+        Args:
+            experiment_id: The experiment's unique ID.
+
+        Returns:
+            A dict with experiment fields, or ``None`` if not found.
+        """
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT * FROM strategy_experiments WHERE id = ?",
+            (experiment_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return dict(row)
+
+    def list_strategy_experiments(
+        self,
+        status: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """List strategy experiments, optionally filtered by status.
+
+        Args:
+            status: Filter by status (``"running"``, ``"completed"``,
+                    ``"cancelled"``).  ``None`` for all.
+
+        Returns:
+            List of experiment dicts, newest first.
+        """
+        conn = self._get_conn()
+        if status is not None:
+            rows = conn.execute(
+                """SELECT * FROM strategy_experiments
+                   WHERE status = ?
+                   ORDER BY created_at DESC""",
+                (status,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """SELECT * FROM strategy_experiments
+                   ORDER BY created_at DESC""",
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    #  Phase 15: Experiment Results
+    # ------------------------------------------------------------------
+
+    def save_experiment_result(self, result_data: Dict[str, Any]) -> int:
+        """Insert a single experiment trial result.
+
+        Args:
+            result_data: Dict with keys: experiment_id, template_id,
+                success (0/1), iterations, cost.
+
+        Returns:
+            The row ID of the inserted record.
+        """
+        now = _iso_timestamp()
+        with self._write_lock:
+            conn = self._get_conn()
+            cursor = conn.execute(
+                """INSERT INTO experiment_results
+                   (experiment_id, template_id, success, iterations,
+                    cost, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (
+                    result_data.get("experiment_id", ""),
+                    result_data.get("template_id", ""),
+                    int(result_data.get("success", 0)),
+                    int(result_data.get("iterations", 0)),
+                    float(result_data.get("cost", 0.0)),
+                    now,
+                ),
+            )
+            self._maybe_commit()
+            return cursor.lastrowid
+
+    def list_experiment_results(
+        self,
+        experiment_id: str,
+        template_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """List experiment trial results.
+
+        Args:
+            experiment_id: The experiment's ID.
+            template_id:    Optional filter by template ID.
+
+        Returns:
+            List of result dicts, oldest first.
+        """
+        conn = self._get_conn()
+        if template_id is not None:
+            rows = conn.execute(
+                """SELECT * FROM experiment_results
+                   WHERE experiment_id = ? AND template_id = ?
+                   ORDER BY id ASC""",
+                (experiment_id, template_id),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """SELECT * FROM experiment_results
+                   WHERE experiment_id = ?
+                   ORDER BY id ASC""",
+                (experiment_id,),
+            ).fetchall()
+        results = []
+        for row in rows:
+            r = dict(row)
+            r["success"] = bool(r["success"])
+            results.append(r)
+        return results
+
+    def count_experiment_results(
+        self,
+        experiment_id: str,
+        template_id: Optional[str] = None,
+    ) -> int:
+        """Count trial results for an experiment.
+
+        Args:
+            experiment_id: The experiment's ID.
+            template_id:    Optional filter by template ID.
+
+        Returns:
+            The number of matching results.
+        """
+        conn = self._get_conn()
+        if template_id is not None:
+            row = conn.execute(
+                """SELECT COUNT(*) AS cnt FROM experiment_results
+                   WHERE experiment_id = ? AND template_id = ?""",
+                (experiment_id, template_id),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                """SELECT COUNT(*) AS cnt FROM experiment_results
+                   WHERE experiment_id = ?""",
+                (experiment_id,),
+            ).fetchone()
+        return row["cnt"]
+
+    # ------------------------------------------------------------------
+    #  Phase 15: Mutation History
+    # ------------------------------------------------------------------
+
+    def save_mutation_history(self, mutation_data: Dict[str, Any]) -> int:
+        """Insert a mutation history record.
+
+        Args:
+            mutation_data: Dict with keys: template_id, parent_id,
+                mutation_type, description, rationale,
+                expected_improvement, reflection_composite,
+                target_dimension, reflection_details,
+                proposal_details.
+
+        Returns:
+            The row ID of the inserted record.
+        """
+        now = _iso_timestamp()
+        with self._write_lock:
+            conn = self._get_conn()
+            cursor = conn.execute(
+                """INSERT INTO mutation_history
+                   (template_id, parent_id, mutation_type, description,
+                    rationale, expected_improvement, reflection_composite,
+                    target_dimension, reflection_details,
+                    proposal_details, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    mutation_data.get("template_id", ""),
+                    mutation_data.get("parent_id"),
+                    mutation_data.get("mutation_type", ""),
+                    mutation_data.get("description", ""),
+                    mutation_data.get("rationale", ""),
+                    float(mutation_data.get("expected_improvement", 0.0)),
+                    float(mutation_data.get("reflection_composite", 0.0)),
+                    mutation_data.get("target_dimension", ""),
+                    mutation_data.get("reflection_details"),
+                    mutation_data.get("proposal_details"),
+                    now,
+                ),
+            )
+            self._maybe_commit()
+            return cursor.lastrowid
+
+    def list_mutation_history(
+        self,
+        template_id: Optional[str] = None,
+        parent_id: Optional[str] = None,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """List mutation history records.
+
+        Args:
+            template_id: Optional filter by the mutated template's ID.
+            parent_id:   Optional filter by the parent template's ID.
+            limit:       Maximum number of results.
+
+        Returns:
+            List of mutation history dicts, newest first.
+        """
+        clauses: List[str] = []
+        params: List[Any] = []
+        if template_id is not None:
+            clauses.append("template_id = ?")
+            params.append(template_id)
+        if parent_id is not None:
+            clauses.append("parent_id = ?")
+            params.append(parent_id)
+
+        where_clause = " AND ".join(clauses) if clauses else "1=1"
+        params.append(limit)
+
+        conn = self._get_conn()
+        rows = conn.execute(
+            f"""SELECT * FROM mutation_history
+                WHERE {where_clause}
+                ORDER BY id DESC
+                LIMIT ?""",
+            params,
+        ).fetchall()
+        return [dict(r) for r in rows]
 
     # ------------------------------------------------------------------
     #  生命周期

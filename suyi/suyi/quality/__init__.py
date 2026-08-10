@@ -66,6 +66,16 @@ from .loop_template import (
     DefaultTemplates,
     compute_task_signature,
 )
+from .strategy_evolver import (
+    ProcessReflection,
+    ExecutionResult,
+    MutationType,
+    MutationProposal,
+    StrategyEvolver,
+    Experiment,
+    ExperimentResult,
+    ABTestFramework,
+)
 
 __all__ = [
     # Grader
@@ -92,4 +102,13 @@ __all__ = [
     "LoopTemplateStore",
     "DefaultTemplates",
     "compute_task_signature",
+    # Strategy evolution (Phase 15)
+    "ProcessReflection",
+    "ExecutionResult",
+    "MutationType",
+    "MutationProposal",
+    "StrategyEvolver",
+    "Experiment",
+    "ExperimentResult",
+    "ABTestFramework",
 ]
