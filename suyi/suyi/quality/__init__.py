@@ -91,6 +91,20 @@ from .evolution_report import (
     EvolutionReport,
     EvolutionReportGenerator,
 )
+from .dynamics_proxy import (
+    EnvironmentState,
+    StateTransition,
+    EnvironmentDynamicsTracker,
+    TrendDirection,
+    AnomalyLevel,
+)
+from .spatial_proxy import (
+    ServiceNode,
+    ServiceEdge,
+    ServiceTopologyMapper,
+    RelationType,
+    NodeHealth,
+)
 
 __all__ = [
     # Grader
@@ -139,4 +153,16 @@ __all__ = [
     # Evolution report (Phase 17)
     "EvolutionReport",
     "EvolutionReportGenerator",
+    # Dynamics proxy (World Proxy — Dynamics)
+    "EnvironmentState",
+    "StateTransition",
+    "EnvironmentDynamicsTracker",
+    "TrendDirection",
+    "AnomalyLevel",
+    # Spatial proxy (World Proxy — Spatial)
+    "ServiceNode",
+    "ServiceEdge",
+    "ServiceTopologyMapper",
+    "RelationType",
+    "NodeHealth",
 ]
