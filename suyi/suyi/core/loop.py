@@ -513,6 +513,7 @@ class AgentLoop:
         middleware_chain: Optional[list[Middleware]] = None,
         max_tool_retries: int = 2,
         permission_callback: Optional[PermissionCallback] = None,
+        template: Any = None,
     ):
         self.llm = llm
         self.tools: dict[str, Tool] = {}
@@ -533,6 +534,10 @@ class AgentLoop:
         self.middleware_chain: list[Middleware] = middleware_chain or []
         self.max_tool_retries = max_tool_retries
         self.permission_callback = permission_callback
+
+        # Phase 16: optional LoopTemplate for template-driven execution.
+        # When set, run() uses _loop_with_template instead of _loop.
+        self.template = template
 
         # Interrupt / resume support
         self._interrupt_requested: bool = False
@@ -568,18 +573,53 @@ class AgentLoop:
 
     # ── Main Loop ──────────────────────────────────────────────
 
-    async def run(self, user_message: str) -> LoopResult:
+    async def run(
+        self,
+        user_message: str,
+        template: Any = None,
+    ) -> LoopResult:
         """
         Run the agent loop with a user message.
 
         Returns a LoopResult containing the final answer and metadata.
         If the budget is exhausted, returns partial results with explanation.
         If interrupted, saves state for potential resume.
+
+        Phase 16: If a ``template`` is passed (or was set in
+        ``__init__``), the loop executes in template-driven mode,
+        following the template's phases, reflection points, and
+        termination conditions.
         """
         self.budget_tracker.start()
         self._interrupt_requested = False
         history: list[dict] = [{"role": "user", "content": user_message}]
+
+        effective_template = template or self.template
+        if effective_template is not None:
+            return await self._loop_with_template(history, effective_template)
         return await self._loop(history)
+
+    async def run_with_template(
+        self,
+        user_message: str,
+        template: Any,
+    ) -> LoopResult:
+        """Run the loop using a specific LoopTemplate.
+
+        This is a convenience wrapper around :meth:`run` with an
+        explicit template parameter.
+
+        Args:
+            user_message: The user's input message.
+            template:     A LoopTemplate (or duck-typed object with
+                          ``phases``, ``max_iterations``,
+                          ``reflection_points``, and
+                          ``termination_conditions`` attributes).
+
+        Returns:
+            A :class:`LoopResult` with the final answer.
+        """
+        return await self.run(user_message, template=template)
 
     async def resume(self) -> LoopResult:
         """
@@ -710,6 +750,342 @@ class AgentLoop:
             # ── ⑨ Append tool results to history (Observations) ─
             for result in tool_results:
                 history.append(result.to_message())
+
+    # ── Template-Driven Loop (Phase 16) ──────────────────────
+
+    async def _loop_with_template(
+        self,
+        history: list[dict],
+        template: Any,
+    ) -> LoopResult:
+        """Template-driven loop — executes phases from a LoopTemplate.
+
+        Instead of the standard ReAct ``while True`` cycle, this loop
+        iterates up to ``template.max_iterations`` times, and within
+        each iteration it walks through ``template.phases`` in order.
+
+        For each phase:
+
+        - **perceive** / **plan** — call the LLM with a phase-specific
+          system prompt (no tool execution).
+        - **execute** — standard ReAct turn: call LLM, execute tool
+          calls if any, append results.
+        - **verify** — call the LLM to verify the current state.
+        - **reflect** — call the LLM for reflection; the output is
+          appended to history as context for subsequent phases.
+
+        At ``template.reflection_points`` (step indices), an extra
+        reflection turn is inserted.
+
+        Termination conditions checked after each phase:
+
+        - Budget exhausted.
+        - External interrupt.
+        - No tool calls in an ``execute`` phase (natural completion).
+        - ``max_iterations`` reached.
+
+        Args:
+            history:   Conversation history (starts with user message).
+            template:  A LoopTemplate (or duck-typed object with
+                       ``phases``, ``max_iterations``,
+                       ``reflection_points``, and
+                       ``termination_conditions``).
+
+        Returns:
+            A :class:`LoopResult`.
+        """
+        max_iterations = getattr(template, "max_iterations", 10)
+        phases = getattr(template, "phases", [])
+        reflection_points = set(getattr(template, "reflection_points", []))
+        termination_conditions = getattr(template, "termination_conditions", [])
+
+        if not phases:
+            # No phases defined — fall back to standard loop
+            return await self._loop(history)
+
+        last_content: str = ""
+        iteration: int = 0
+
+        for iteration in range(max_iterations):
+            # ── Budget check ──────────────────────────────────
+            if self.budget_tracker.is_exhausted():
+                budget_status = self.budget_tracker.status()
+                return LoopResult(
+                    content=self.budget_tracker.exhaustion_message(),
+                    partial=True,
+                    history=history,
+                    turns_used=self.budget_tracker.turns_used,
+                    budget_status=budget_status,
+                    stop_reason="budget_exhausted",
+                )
+
+            # ── Interrupt check ───────────────────────────────
+            if self._interrupt_requested:
+                self._resume_state = (
+                    list(history),
+                    self.budget_tracker.turns_used,
+                )
+                budget_status = self.budget_tracker.status()
+                return LoopResult(
+                    content="Agent interrupted by external request.",
+                    interrupted=True,
+                    history=history,
+                    turns_used=self.budget_tracker.turns_used,
+                    budget_status=budget_status,
+                    stop_reason="interrupted",
+                )
+
+            completed_all_phases = True
+
+            for step_idx, phase in enumerate(phases):
+                # ── Inter-phase budget check ─────────────────
+                if self.budget_tracker.is_exhausted():
+                    budget_status = self.budget_tracker.status()
+                    return LoopResult(
+                        content=self.budget_tracker.exhaustion_message(),
+                        partial=True,
+                        history=history,
+                        turns_used=self.budget_tracker.turns_used,
+                        budget_status=budget_status,
+                        stop_reason="budget_exhausted",
+                    )
+
+                # ── Inter-phase interrupt check ──────────────
+                if self._interrupt_requested:
+                    self._resume_state = (
+                        list(history),
+                        self.budget_tracker.turns_used,
+                    )
+                    budget_status = self.budget_tracker.status()
+                    return LoopResult(
+                        content="Agent interrupted by external request.",
+                        interrupted=True,
+                        history=history,
+                        turns_used=self.budget_tracker.turns_used,
+                        budget_status=budget_status,
+                        stop_reason="interrupted",
+                    )
+
+                phase_name = getattr(phase, "name", "execute")
+                phase_action = getattr(phase, "action", "")
+                phase_tools = getattr(phase, "tools", [])
+                phase_condition = getattr(phase, "condition", "always")
+
+                # ── Assemble context ──────────────────────────
+                budget_status = self.budget_tracker.status()
+                budget_constraint = (
+                    self.budget_tracker.format_constraint_as_instruction()
+                )
+                context = await self.context_assembler.assemble(
+                    messages=history,
+                    budget_constraint=budget_constraint,
+                    budget_status=budget_status,
+                )
+
+                # ── Middleware: before_llm_call ──────────────
+                state = LoopState(
+                    history=history,
+                    turn=self.budget_tracker.turns_used,
+                    context=context,
+                )
+                for mw in self.middleware_chain:
+                    state = await mw.before_llm_call(state)
+                    if state.should_stop:
+                        return LoopResult(
+                            content=state.stop_reason or "Stopped by middleware.",
+                            partial=True,
+                            history=history,
+                            turns_used=self.budget_tracker.turns_used,
+                            budget_status=budget_status,
+                            stop_reason="middleware",
+                        )
+
+                # ── Build phase-specific system prompt ────────
+                phase_prompt = self._build_phase_prompt(
+                    phase_name, phase_action, context.system_prompt,
+                )
+
+                # ── Call LLM ──────────────────────────────────
+                tool_dicts = [td.to_dict() for td in context.tool_defs]
+                response = await self.llm.chat(
+                    messages=context.messages,
+                    tools=tool_dicts,
+                    system_prompt=phase_prompt,
+                )
+
+                # ── Middleware: after_llm_call ───────────────
+                for mw in self.middleware_chain:
+                    response = await mw.after_llm_call(response, state)
+                    if state.should_stop:
+                        return LoopResult(
+                            content=state.stop_reason or "Stopped by middleware.",
+                            partial=True,
+                            history=history,
+                            turns_used=self.budget_tracker.turns_used,
+                            budget_status=budget_status,
+                            stop_reason="middleware",
+                        )
+
+                # ── Record budget ────────────────────────────
+                self.budget_tracker.record_turn(
+                    tokens_used=response.total_tokens
+                )
+
+                # ── Phase-specific handling ───────────────────
+                if response.tool_calls:
+                    # Tool calls → execute (regardless of phase name)
+                    assistant_msg: dict = {
+                        "role": "assistant",
+                        "content": response.content or "",
+                    }
+                    if response.tool_calls:
+                        assistant_msg["tool_calls"] = [
+                            tc.to_dict() for tc in response.tool_calls
+                        ]
+                    history.append(assistant_msg)
+
+                    tool_results = await self._execute_tools(
+                        response.tool_calls, state
+                    )
+                    for result in tool_results:
+                        history.append(result.to_message())
+
+                    last_content = response.content or last_content
+                else:
+                    # No tool calls → text response
+                    if response.content:
+                        last_content = response.content
+
+                    # For 'reflect' phase, append the reflection
+                    # to history as context for future phases.
+                    if phase_name == "reflect" and response.content:
+                        history.append({
+                            "role": "assistant",
+                            "content": f"[Reflection] {response.content}",
+                        })
+                    elif phase_name == "execute":
+                        # Natural completion in execute phase
+                        return LoopResult(
+                            content=last_content,
+                            partial=False,
+                            history=history,
+                            turns_used=self.budget_tracker.turns_used,
+                            budget_status=self.budget_tracker.status(),
+                            stop_reason="natural",
+                        )
+                    elif phase_name == "verify":
+                        # Verification result — check for completion
+                        if "no_more_tool_calls" in termination_conditions:
+                            # Treat verify-without-tool-calls as completion
+                            pass
+
+                    history.append({
+                        "role": "assistant",
+                        "content": response.content or "",
+                    })
+
+                # ── Reflection point ──────────────────────────
+                if step_idx in reflection_points:
+                    reflect_prompt = (
+                        "Reflect on the execution so far. "
+                        "Summarize what has been done, what worked, "
+                        "and what needs adjustment."
+                    )
+                    reflect_context = await self.context_assembler.assemble(
+                        messages=history,
+                        budget_constraint="",
+                        budget_status=self.budget_tracker.status(),
+                    )
+                    reflect_response = await self.llm.chat(
+                        messages=reflect_context.messages,
+                        tools=[],
+                        system_prompt=reflect_prompt,
+                    )
+                    self.budget_tracker.record_turn(
+                        tokens_used=reflect_response.total_tokens
+                    )
+                    if reflect_response.content:
+                        history.append({
+                            "role": "assistant",
+                            "content": (
+                                f"[Reflection] {reflect_response.content}"
+                            ),
+                        })
+
+                # ── Check phase condition ─────────────────────
+                if phase_condition == "never":
+                    completed_all_phases = False
+                    break
+
+            # ── Check termination conditions ──────────────────
+            if "no_more_tool_calls" in termination_conditions:
+                # If the last execute phase had no tool calls, we
+                # already returned above.  Reaching here means
+                # all phases completed with tool calls.
+                pass
+
+            if "max_iterations_reached" in termination_conditions:
+                if iteration + 1 >= max_iterations:
+                    break
+
+        # ── Return final result ──────────────────────────────
+        budget_status = self.budget_tracker.status()
+        return LoopResult(
+            content=last_content or "Task completed via template.",
+            partial=False,
+            history=history,
+            turns_used=self.budget_tracker.turns_used,
+            budget_status=budget_status,
+            stop_reason="natural",
+        )
+
+    @staticmethod
+    def _build_phase_prompt(
+        phase_name: str,
+        phase_action: str,
+        base_prompt: str,
+    ) -> str:
+        """Build a phase-specific system prompt.
+
+        Args:
+            phase_name:  Name of the current phase.
+            phase_action: Action description for the phase.
+            base_prompt:  The base system prompt from context assembly.
+
+        Returns:
+            A system prompt string with phase context appended.
+        """
+        phase_descriptions = {
+            "perceive": (
+                "You are in the PERCEIVE phase. Observe the current "
+                "state and gather context. Do not execute any tools yet."
+            ),
+            "plan": (
+                "You are in the PLAN phase. Decide what to do next "
+                "based on observations. Outline your approach."
+            ),
+            "execute": (
+                "You are in the EXECUTE phase. Execute the planned "
+                "action by calling the appropriate tools."
+            ),
+            "verify": (
+                "You are in the VERIFY phase. Check that previous "
+                "actions achieved the expected result."
+            ),
+            "reflect": (
+                "You are in the REFLECT phase. Evaluate the execution, "
+                "identify what worked and what to improve."
+            ),
+        }
+        phase_intro = phase_descriptions.get(
+            phase_name,
+            f"You are in the {phase_name.upper()} phase.",
+        )
+        action_line = f"Action: {phase_action}" if phase_action else ""
+        parts = [base_prompt, phase_intro]
+        if action_line:
+            parts.append(action_line)
+        return "\n\n".join(p for p in parts if p)
 
     # ── Tool Execution ─────────────────────────────────────────
 

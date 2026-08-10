@@ -76,6 +76,17 @@ from .strategy_evolver import (
     ExperimentResult,
     ABTestFramework,
 )
+from .bilevel_loop import (
+    ExecutionLogEntry,
+    ExecutionLog,
+    TaskResult,
+    TriggerType,
+    TriggerConfig,
+    TriggerEvaluator,
+    TaskLoop,
+    EvolutionLoop,
+    BilevelLoop,
+)
 
 __all__ = [
     # Grader
@@ -111,4 +122,14 @@ __all__ = [
     "Experiment",
     "ExperimentResult",
     "ABTestFramework",
+    # Bilevel loop (Phase 16)
+    "ExecutionLogEntry",
+    "ExecutionLog",
+    "TaskResult",
+    "TriggerType",
+    "TriggerConfig",
+    "TriggerEvaluator",
+    "TaskLoop",
+    "EvolutionLoop",
+    "BilevelLoop",
 ]
