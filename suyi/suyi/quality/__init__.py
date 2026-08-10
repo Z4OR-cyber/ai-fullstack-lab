@@ -87,6 +87,10 @@ from .bilevel_loop import (
     EvolutionLoop,
     BilevelLoop,
 )
+from .evolution_report import (
+    EvolutionReport,
+    EvolutionReportGenerator,
+)
 
 __all__ = [
     # Grader
@@ -132,4 +136,7 @@ __all__ = [
     "TaskLoop",
     "EvolutionLoop",
     "BilevelLoop",
+    # Evolution report (Phase 17)
+    "EvolutionReport",
+    "EvolutionReportGenerator",
 ]

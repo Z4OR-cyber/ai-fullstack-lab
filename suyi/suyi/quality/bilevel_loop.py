@@ -1108,7 +1108,7 @@ class EvolutionLoop:
             store=self._store, backend=self._store._backend
         )
         self._forgetting = forgetting_engine or ForgettingEngine(is_dry_run=True)
-        self._anti_patterns = anti_pattern_store or AntiPatternStore()
+        self._anti_patterns = anti_pattern_store if anti_pattern_store is not None else AntiPatternStore()
         self._trigger_config = trigger_config or TriggerConfig()
         self._quality_assessor = quality_assessor or QualityAssessor()
 
