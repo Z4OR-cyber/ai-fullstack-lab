@@ -626,6 +626,32 @@ suyi/
 - 每个公共类和方法都有 docstring
 - 测试覆盖所有公共 API
 
+## Related Work
+
+Suyi 的 ALA（Adaptive Loop Architecture）设计与以下学术工作存在概念关联：
+
+### 核心参考框架
+
+- **World Proxy** (Yang et al., 2026) — "Quo Vadis, World Modeling? Towards Interactive World Proxies for Continually Improving Agents" [arXiv:2608.02713](https://arxiv.org/abs/2608.02713)。该论文提出六功能×三层级矩阵（Dynamics / Spatial / Execution / Memory-Experience / Skill / Reward-Verification × L1推理时引导 / L2训练时优化 / L3共同演化），Suyi ALA 覆盖其中 4/6 功能和全部 3 个层级，并补充了 Dynamics Proxy 和 Spatial Proxy 模块。
+
+### L3 共同演化相关
+
+- **WebEvolver** (EMNLP 2025) — Web Agent 自我改进与共演化世界模型
+- **CASCADE** (arXiv 2025) — 自主技能创建和进化
+- **CodeIt** (ICML 2024) — 自改进 + 优先级回放
+- **Voyager** (TMLR 2024) — 开放式 Agent + 技能库积累
+- **RAGEN** (arXiv 2025) — 多轮 RL 自进化理解
+
+### 原创性声明
+
+Suyi ALA 的以下设计在现有文献中未发现完全等同的实现：
+1. **Loop 模板即记忆** — 将 Loop 执行结构本身（phases / reflection_points / budgets）模板化并作为可检索记忆
+2. **质量分级遗忘** — 结合来源分级(S-D)和结果分级(Verified-Failed)的 Ebbinghaus 遗忘曲线驱动记忆生命周期
+3. **策略变异进化** — 六种变异策略 + z 检验/Wilson 区间统计显著性验证的 A/B 实验框架
+4. **双层循环架构** — 内层 TaskLoop（业务执行）+ 外层 EvolutionLoop（自我进化）+ 四种触发机制
+5. **反面记忆** — 失败模式提取 + 永不自动删除 + 检索优先级提升
+6. **环境动态代理** — 软件环境状态转移建模 + 趋势预测 + 异常检测
+
 ## License
 
 MIT License
