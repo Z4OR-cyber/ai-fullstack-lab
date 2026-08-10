@@ -5,6 +5,8 @@ Exports:
     SuyiServer:  Async HTTP server built on the standard library.
     AuthConfig:  Authentication & CORS configuration dataclass.
     AuthManager: API Key + JWT authentication and CORS manager.
+    RBACManager: Role-Based Access Control manager.
+    AuditLogger: Security audit log recorder.
 
 The server exposes a small REST API for interacting with a Suyi agent
 without depending on Flask, FastAPI, or any third-party web framework.
@@ -23,6 +25,12 @@ Authentication:
     - JWT (HS256) via ``Authorization: Bearer <jwt>``
     - Priority: JWT > API Key
 
+Authorization (RBAC):
+    - Role-based access control via ``RBACManager``
+    - Roles: ADMIN / DEVELOPER / OPERATOR / VIEWER
+    - Permissions: READ / WRITE / EXECUTE / DELETE / MANAGE_USERS / VIEW_AUDIT_LOG
+    - Auditable actions recorded via ``AuditLogger``
+
 Usage::
 
     from suyi.web import SuyiServer, AuthConfig
@@ -40,9 +48,29 @@ Usage::
 
 from .server import SuyiServer
 from .auth import AuthConfig, AuthManager
+from .rbac import (
+    RBACManager,
+    Role,
+    Permission,
+    ROLE_PERMISSIONS,
+)
+from .audit_log import (
+    AuditLogger,
+    AuditEntry,
+    AuditResult,
+    AuditLevel,
+)
 
 __all__ = [
     "SuyiServer",
     "AuthConfig",
     "AuthManager",
+    "RBACManager",
+    "Role",
+    "Permission",
+    "ROLE_PERMISSIONS",
+    "AuditLogger",
+    "AuditEntry",
+    "AuditResult",
+    "AuditLevel",
 ]
