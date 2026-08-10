@@ -69,6 +69,14 @@ Suyi 是一个纯 Python 实现的自进化 AI Agent 框架，不依赖 PyTorch 
 | **Evolution Report** | 17 | 进化报告生成器 — to_dict/to_markdown/to_json + 8 部分结构化报告 |
 | **E2E Evolution Cycle** | 17 | 12 轮端到端进化循环验证 — 模板积累 + 遗忘压缩 + 策略变异 + A/B 实验 + 反面记忆注册 |
 
+**生产化模块（v1.1.0 — P1 缺口闭环）：**
+
+| 模块 | Phase | 说明 |
+|------|-------|------|
+| **Cron Scheduler** | 19a | 5 段 cron 表达式解析器 + TaskScheduler 注册/移除/查询/SQLite 持久化 + CronTrigger 连接 AgentLoop + MockLoop 注入测试 |
+| **RBAC** | 19b | Role(ADMIN/DEVELOPER/OPERATOR/VIEWER) + Permission(READ/WRITE/EXECUTE/DELETE/MANAGE_USERS/VIEW_AUDIT_LOG) + RBACManager 角色分配/撤销/检查/SQLite 持久化 |
+| **Audit Log** | 19b | AuditEntry + AuditResult(SUCCESS/DENIED/ERROR) + AuditLevel(INFO/WARNING/CRITICAL) + AuditLogger 记录/查询/过滤/用户活动/拒绝尝试/严重事件/SQLite 持久化 |
+
 ## 架构总览
 
 ```
@@ -588,7 +596,8 @@ suyi/
 │   ├── llm/                 # LLM 适配器 (OpenAI / Anthropic)
 │   ├── config/              # 配置系统
 │   ├── cli/                 # 交互式 CLI
-│   ├── web/                 # HTTP API 服务器
+│   ├── web/                 # HTTP API 服务器 + RBAC + 审计日志
+│   ├── scheduler/           # Cron 定时任务调度器
 │   ├── persistence/         # 会话持久化 (JSON)
 │   ├── streaming/           # 流式输出处理器
 │   ├── rag/                 # RAG 管道 (文档分块/检索/增强)
@@ -606,7 +615,7 @@ suyi/
 │   ├── cost/                 # 成本追踪
 │   ├── feedback/             # 反馈闭环
 │   └── utils/               # 工具函数
-├── tests/                   # 测试套件 (2774 个测试)
+├── tests/                   # 测试套件 (3051 个测试)
 ├── examples/                # 示例代码
 ├── data/                    # 数据目录
 ├── pyproject.toml           # 打包配置
