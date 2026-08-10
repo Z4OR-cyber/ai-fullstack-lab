@@ -495,6 +495,8 @@ ALA 是 Suyi 的核心创新 — 让 Loop 本身成为可进化的记忆，实�
 - **StrategyEvolver**：ProcessReflection 五维反思（效率/质量/成本/鲁棒性/创新性）+ 六种变异（PHASE_REORDER / BUDGET_REALLOC / REFLECTION_INSERT / PROMPT_REFINE / TOOL_SWAP / PHASE_MERGE）+ A/B z 检验
 - **BilevelLoop**：内层 TaskLoop 执行业务 + 外层 EvolutionLoop 自我进化 + 四种触发机制 + ConfigurableTaskLoop 测试辅助
 - **EvolutionReportGenerator**：8 部分结构化报告（任务概览 / 模板演化 / 遗忘摘要 / 变异历史 / A/B 结果 / 性能对比 / 关键发现 / 建议）
+- **EnvironmentDynamicsTracker** (Phase 18)：环境状态快照 + 状态转移检测 + 一阶马尔可夫链预测 + z-score 异常检测 + 最小二乘法趋势分析 + SQLite 持久化
+- **ServiceTopologyMapper** (Phase 18)：服务拓扑图（邻接表/逆邻接表）+ BFS 最短路径 + 瓶颈节点识别 + 能力→节点映射 + 故障替代路径建议 + JSON 序列化 + SQLite 持久化
 
 **原创性声明：**
 - 质量分级：RAGAS 最近，但引入记忆生命周期评分
@@ -598,7 +600,7 @@ suyi/
 │   ├── vectorstore/         # 向量存储 (numpy余弦相似度)
 │   ├── multimodal/          # 多模态输入 (text/image/audio/video)
 │   └── utils/               # 工具函数
-│   ├── quality/              # ALA: 质量分级 + 遗忘引擎 + 反面记忆 + Loop模板 + 策略进化器 + 双层循环
+│   ├── quality/              # ALA: 质量分级 + 遗忘引擎 + 反面记忆 + Loop模板 + 策略进化器 + 双层循环 + Dynamics/Spatial Proxy
 │   ├── ratelimit/            # 限流模块
 │   ├── statemachine/         # 状态机
 │   ├── cost/                 # 成本追踪
@@ -632,7 +634,7 @@ Suyi 的 ALA（Adaptive Loop Architecture）设计与以下学术工作存在概
 
 ### 核心参考框架
 
-- **World Proxy** (Yang et al., 2026) — "Quo Vadis, World Modeling? Towards Interactive World Proxies for Continually Improving Agents" [arXiv:2608.02713](https://arxiv.org/abs/2608.02713)。该论文提出六功能×三层级矩阵（Dynamics / Spatial / Execution / Memory-Experience / Skill / Reward-Verification × L1推理时引导 / L2训练时优化 / L3共同演化），Suyi ALA 覆盖其中 4/6 功能和全部 3 个层级，并补充了 Dynamics Proxy 和 Spatial Proxy 模块。
+- **World Proxy** (Yang et al., 2026) — "Quo Vadis, World Modeling? Towards Interactive World Proxies for Continually Improving Agents" [arXiv:2608.02713](https://arxiv.org/abs/2608.02713)。该论文提出六功能×三层级矩阵（Dynamics / Spatial / Execution / Memory-Experience / Skill / Reward-Verification × L1推理时引导 / L2训练时优化 / L3共同演化），Suyi ALA 覆盖全部 6/6 功能和全部 3 个层级（含 Phase 18 新增的 Dynamics Proxy 和 Spatial Proxy 模块）。
 
 ### L3 共同演化相关
 
