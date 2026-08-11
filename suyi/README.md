@@ -77,6 +77,12 @@ Suyi 是一个纯 Python 实现的自进化 AI Agent 框架，不依赖 PyTorch 
 | **RBAC** | 19b | Role(ADMIN/DEVELOPER/OPERATOR/VIEWER) + Permission(READ/WRITE/EXECUTE/DELETE/MANAGE_USERS/VIEW_AUDIT_LOG) + RBACManager 角色分配/撤销/检查/SQLite 持久化 |
 | **Audit Log** | 19b | AuditEntry + AuditResult(SUCCESS/DENIED/ERROR) + AuditLevel(INFO/WARNING/CRITICAL) + AuditLogger 记录/查询/过滤/用户活动/拒绝尝试/严重事件/SQLite 持久化 |
 
+**智能LLM路由（v1.2.0 — AutoRouter）：**
+
+| 模块 | Phase | 说明 |
+|------|-------|------|
+| **AutoRouter** | 20 | 五维任务复杂度分析(prompt长度/工具数/关键词/多步指示/系统提示) + 三层模型路由(SIMPLE/STANDARD/COMPLEX) + 自动模型发现 + 降级fallback + 轮询/随机/优先策略 + 路由统计 |
+
 ## 架构总览
 
 ```
@@ -593,7 +599,7 @@ suyi/
 │   ├── middleware/          # 可插拔中间件链
 │   ├── agents/              # 多 Agent 系统
 │   ├── evolution/           # 自进化引擎
-│   ├── llm/                 # LLM 适配器 (OpenAI / Anthropic)
+│   ├── llm/                 # LLM 适配器 (OpenAI / Anthropic / OmniRoute / **AutoRouter智能路由**)
 │   ├── config/              # 配置系统
 │   ├── cli/                 # 交互式 CLI
 │   ├── web/                 # HTTP API 服务器 + RBAC + 审计日志
@@ -615,7 +621,7 @@ suyi/
 │   ├── cost/                 # 成本追踪
 │   ├── feedback/             # 反馈闭环
 │   └── utils/               # 工具函数
-├── tests/                   # 测试套件 (3051 个测试)
+├── tests/                   # 测试套件 (3121 个测试)
 ├── examples/                # 示例代码
 ├── data/                    # 数据目录
 ├── pyproject.toml           # 打包配置
