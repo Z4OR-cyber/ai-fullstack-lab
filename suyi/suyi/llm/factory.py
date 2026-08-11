@@ -33,6 +33,7 @@ from ..core.loop import LLMInterface
 from .openai_adapter import OpenAIAdapter
 from .anthropic_adapter import AnthropicAdapter
 from .omniroute_adapter import OmniRouteAdapter
+from .auto_router import AutoRouter
 
 
 # Registry of provider → adapter class
@@ -40,6 +41,7 @@ _PROVIDER_REGISTRY: dict[str, type] = {
     "openai": OpenAIAdapter,
     "anthropic": AnthropicAdapter,
     "omniroute": OmniRouteAdapter,
+    "auto": AutoRouter,
 }
 
 # Aliases for common OpenAI-compatible providers
@@ -54,6 +56,8 @@ _PROVIDER_ALIASES: dict[str, str] = {
     "vllm": "openai",
     "claude": "anthropic",
     "omni": "omniroute",
+    "smart": "auto",
+    "router": "auto",
 }
 
 
@@ -93,6 +97,21 @@ def create_llm(provider: str, **kwargs: Any) -> LLMInterface:
             f"Unsupported LLM provider: '{provider}'. "
             f"Supported providers: {supported}"
         )
+
+    # AutoRouter 特殊处理：先创建底层 adapter，再用 AutoRouter 包装
+    if resolved == "auto":
+        # 如果传入了 adapter 实例，直接包装
+        if "adapter" in kwargs:
+            return AutoRouter(**kwargs)
+        # 否则创建 OmniRouteAdapter 作为底层
+        adapter_kwargs = {k: v for k, v in kwargs.items()
+                          if k in ("api_key", "base_url", "model", "temperature",
+                                    "max_tokens", "timeout", "max_retries", "retry_interval")}
+        inner_adapter = OmniRouteAdapter(**adapter_kwargs)
+        router_kwargs = {k: v for k, v in kwargs.items()
+                         if k in ("model_tiers", "strategy", "enable_fallback",
+                                   "history_size", "enable_logging")}
+        return AutoRouter(adapter=inner_adapter, **router_kwargs)
 
     adapter_class = _PROVIDER_REGISTRY[resolved]
     return adapter_class(**kwargs)
