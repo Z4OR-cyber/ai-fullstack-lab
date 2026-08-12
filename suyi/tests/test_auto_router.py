@@ -329,6 +329,33 @@ class TestModelClassifier:
         # "flash" 应该优先匹配为 SIMPLE
         assert ModelClassifier.classify("google/gemini-flash-1.5-pro") == ModelTier.SIMPLE
 
+    # ── OmniRoute auto 变体分类 ────────────────────────────────
+
+    def test_classify_auto_coding_as_complex(self):
+        """auto/coding 应分类为 COMPLEX（质量优先编码任务）。"""
+        assert ModelClassifier.classify("auto/coding") == ModelTier.COMPLEX
+
+    def test_classify_auto_best_free_as_simple(self):
+        """auto/best-free 应分类为 SIMPLE（零成本）。"""
+        assert ModelClassifier.classify("auto/best-free") == ModelTier.SIMPLE
+
+    def test_classify_auto_as_standard(self):
+        """auto 应分类为 STANDARD（默认 LKGP 路由）。"""
+        assert ModelClassifier.classify("auto") == ModelTier.STANDARD
+
+    def test_classify_auto_variants_priority(self):
+        """COMPLEX 优先级高于 SIMPLE — auto/coding 不应被 best-free 干扰。"""
+        # auto/coding 包含 "coding" (COMPLEX) 和不包含 "best-free"
+        assert ModelClassifier.classify("auto/coding") == ModelTier.COMPLEX
+        # auto/best-free 包含 "best-free" (SIMPLE)
+        assert ModelClassifier.classify("auto/best-free") == ModelTier.SIMPLE
+
+    def test_default_model_tiers_uses_auto_variants(self):
+        """默认模型分层应使用 OmniRoute auto 变体。"""
+        assert "auto/best-free" in _DEFAULT_MODEL_TIERS[ModelTier.SIMPLE]
+        assert "auto" in _DEFAULT_MODEL_TIERS[ModelTier.STANDARD]
+        assert "auto/coding" in _DEFAULT_MODEL_TIERS[ModelTier.COMPLEX]
+
 
 # ═══════════════════════════════════════════════════════════════
 # RoutingDecision 测试

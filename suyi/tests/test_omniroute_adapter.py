@@ -39,8 +39,8 @@ class TestOmniRouteAdapterInit:
         """使用全部默认参数创建适配器。"""
         adapter = OmniRouteAdapter()
         assert adapter.base_url == "http://localhost:20128/v1"
-        assert adapter.model == "auto"
-        assert adapter.api_key == "omniroute-local"
+        assert adapter.model == "auto/best-free"
+        assert adapter.api_key == "sk-ac3f703f89a3c4a7-e18773-1c0655db"
         assert adapter.temperature == 0.7
         assert adapter.max_tokens == 4096
         assert adapter.max_retries == 3
@@ -74,9 +74,9 @@ class TestOmniRouteAdapterInit:
 
     def test_init_no_api_key_required(self):
         """OmniRoute 不强制要求 API key（与 OpenAIAdapter 不同）。"""
-        # 不传 api_key 不应报错
+        # 不传 api_key 不应报错，使用配置的默认 key
         adapter = OmniRouteAdapter()
-        assert adapter.api_key == "omniroute-local"
+        assert adapter.api_key == "sk-ac3f703f89a3c4a7-e18773-1c0655db"
 
     def test_init_is_subclass_of_openai(self):
         """OmniRouteAdapter 应继承 OpenAIAdapter。"""
@@ -94,11 +94,19 @@ class TestOmniRouteHeaders:
     """测试 OmniRouteAdapter 的请求头构建。"""
 
     def test_headers_without_api_key(self):
-        """默认（无认证）模式不应包含 Authorization 头。"""
-        adapter = OmniRouteAdapter()
+        """使用 'omniroute-local'（无认证模式）时不应包含 Authorization 头。"""
+        adapter = OmniRouteAdapter(api_key="omniroute-local")
         headers = adapter._build_headers()
         assert "Content-Type" in headers
         assert "Authorization" not in headers
+
+    def test_headers_default_with_api_key(self):
+        """默认配置应包含 Authorization 头（使用配置的 API key）。"""
+        adapter = OmniRouteAdapter()
+        headers = adapter._build_headers()
+        assert "Content-Type" in headers
+        assert "Authorization" in headers
+        assert headers["Authorization"] == "Bearer sk-ac3f703f89a3c4a7-e18773-1c0655db"
 
     def test_headers_with_api_key(self):
         """传入真实 API key 时应包含 Bearer 认证头。"""
@@ -116,14 +124,14 @@ class TestOmniRouteRequestBuilding:
     """测试 OmniRouteAdapter 请求体构建。"""
 
     def test_build_body_model_auto(self):
-        """model="auto" 应正确写入请求体。"""
+        """model="auto/best-free"（默认）应正确写入请求体。"""
         adapter = OmniRouteAdapter()
         body = adapter._build_request_body(
             messages=[{"role": "user", "content": "Hello"}],
             tools=[],
             system_prompt="You are helpful.",
         )
-        assert body["model"] == "auto"
+        assert body["model"] == "auto/best-free"
         assert body["messages"][0] == {"role": "system", "content": "You are helpful."}
         assert body["messages"][1] == {"role": "user", "content": "Hello"}
 
@@ -522,7 +530,7 @@ class TestOmniRouteChat:
         call_args = mock_client.post.call_args
         assert call_args[0][0] == "http://localhost:20128/v1/chat/completions"
         body = call_args[1]["json"]
-        assert body["model"] == "auto"
+        assert body["model"] == "auto/best-free"
 
     async def test_chat_with_tool_calls(self):
         """带工具调用的响应。"""
@@ -922,7 +930,7 @@ class TestOmniRouteFactory:
         llm = create_llm("omniroute")
         assert isinstance(llm, OmniRouteAdapter)
         assert llm.base_url == "http://localhost:20128/v1"
-        assert llm.model == "auto"
+        assert llm.model == "auto/best-free"
 
     def test_create_omniroute_with_custom_params(self):
         """工厂创建 OmniRouteAdapter（自定义参数）。"""
@@ -1033,3 +1041,334 @@ class TestOmniRouteLifecycle:
         adapter = OmniRouteAdapter()
         adapter._client = None
         await adapter.close()  # 不应抛出异常
+
+# ═══════════════════════════════════════════════════════════════
+#  Cost 监控测试
+# ═══════════════════════════════════════════════════════════════
+
+
+class TestOmniRouteCostHeaders:
+    """测试 OmniRouteAdapter._extract_cost_headers()。"""
+
+    def test_extract_cost_headers_full(self):
+        """完整的 cost 响应头应被正确解析。"""
+        adapter = OmniRouteAdapter()
+
+        mock_response = MagicMock()
+        mock_response.headers = {
+            "x-omniroute-response-cost": "0.00234",
+            "x-omniroute-provider": "openai",
+            "x-omniroute-model": "gpt-4o",
+            "x-omniroute-tokens-in": "1234",
+            "x-omniroute-tokens-out": "567",
+        }
+
+        info = adapter._extract_cost_headers(mock_response)
+        assert info["cost"] == 0.00234
+        assert info["provider"] == "openai"
+        assert info["model"] == "gpt-4o"
+        assert info["tokens_in"] == 1234
+        assert info["tokens_out"] == 567
+
+    def test_extract_cost_headers_empty(self):
+        """无 cost 头时所有字段应为 None。"""
+        adapter = OmniRouteAdapter()
+
+        mock_response = MagicMock()
+        mock_response.headers = {}
+
+        info = adapter._extract_cost_headers(mock_response)
+        assert info["cost"] is None
+        assert info["provider"] is None
+        assert info["model"] is None
+        assert info["tokens_in"] is None
+        assert info["tokens_out"] is None
+
+    def test_extract_cost_headers_partial(self):
+        """部分 cost 头存在时只解析存在的字段。"""
+        adapter = OmniRouteAdapter()
+
+        mock_response = MagicMock()
+        mock_response.headers = {
+            "x-omniroute-response-cost": "0.0",
+            "x-omniroute-provider": "groq",
+        }
+
+        info = adapter._extract_cost_headers(mock_response)
+        assert info["cost"] == 0.0
+        assert info["provider"] == "groq"
+        assert info["model"] is None
+        assert info["tokens_in"] is None
+        assert info["tokens_out"] is None
+
+    def test_extract_cost_headers_invalid_values(self):
+        """无效的数值格式应返回 None 而非报错。"""
+        adapter = OmniRouteAdapter()
+
+        mock_response = MagicMock()
+        mock_response.headers = {
+            "x-omniroute-response-cost": "not-a-number",
+            "x-omniroute-tokens-in": "abc",
+            "x-omniroute-tokens-out": "",
+        }
+
+        info = adapter._extract_cost_headers(mock_response)
+        assert info["cost"] is None
+        assert info["tokens_in"] is None
+        assert info["tokens_out"] is None
+
+    def test_extract_cost_headers_zero_cost(self):
+        """零成本应被正确解析（auto/best-free 场景）。"""
+        adapter = OmniRouteAdapter()
+
+        mock_response = MagicMock()
+        mock_response.headers = {
+            "x-omniroute-response-cost": "0",
+            "x-omniroute-provider": "free-provider",
+            "x-omniroute-model": "gemini-flash",
+            "x-omniroute-tokens-in": "100",
+            "x-omniroute-tokens-out": "50",
+        }
+
+        info = adapter._extract_cost_headers(mock_response)
+        assert info["cost"] == 0.0
+        assert info["provider"] == "free-provider"
+
+
+class TestOmniRouteCostRecording:
+    """测试 OmniRouteAdapter._record_cost() 和 cost 查询。"""
+
+    def test_record_cost_caches_to_memory(self):
+        """cost 信息应被缓存到 _cost_log。"""
+        adapter = OmniRouteAdapter()
+        cost_info = {
+            "cost": 0.001,
+            "provider": "openai",
+            "model": "gpt-4o",
+            "tokens_in": 100,
+            "tokens_out": 50,
+        }
+        adapter._record_cost(cost_info)
+        assert len(adapter._cost_log) == 1
+        entry = adapter._cost_log[0]
+        assert entry["cost"] == 0.001
+        assert entry["provider"] == "openai"
+        assert entry["request_model"] == "auto/best-free"
+        assert "timestamp" in entry
+
+    def test_record_cost_with_backend(self):
+        """cost_backend 存在时应调用 set 方法持久化。"""
+        adapter = OmniRouteAdapter()
+        mock_backend = MagicMock()
+        mock_backend.set = MagicMock()
+        adapter.cost_backend = mock_backend
+
+        cost_info = {
+            "cost": 0.002,
+            "provider": "anthropic",
+            "model": "claude-sonnet-4-20250514",
+            "tokens_in": 200,
+            "tokens_out": 100,
+        }
+        adapter._record_cost(cost_info)
+
+        mock_backend.set.assert_called_once()
+        call_args = mock_backend.set.call_args
+        key = call_args[0][0]
+        value = call_args[0][1]
+        assert key.startswith("cost_log:")
+        assert value["cost"] == 0.002
+        assert value["provider"] == "anthropic"
+
+    def test_record_cost_backend_failure_no_crash(self):
+        """cost_backend 出错时不应崩溃，仅记录警告。"""
+        adapter = OmniRouteAdapter()
+        mock_backend = MagicMock()
+        mock_backend.set = MagicMock(side_effect=RuntimeError("DB error"))
+        adapter.cost_backend = mock_backend
+
+        cost_info = {"cost": 0.001, "provider": "test", "model": "test",
+                     "tokens_in": 10, "tokens_out": 5}
+        # 不应抛出异常
+        adapter._record_cost(cost_info)
+        assert len(adapter._cost_log) == 1  # 仍然缓存到内存
+
+    def test_record_cost_none_values(self):
+        """所有 cost 值为 None 时也应正常记录。"""
+        adapter = OmniRouteAdapter()
+        cost_info = {"cost": None, "provider": None, "model": None,
+                     "tokens_in": None, "tokens_out": None}
+        adapter._record_cost(cost_info)
+        assert len(adapter._cost_log) == 1
+
+    def test_cost_history_property(self):
+        """cost_history 属性返回所有记录的副本。"""
+        adapter = OmniRouteAdapter()
+        for i in range(3):
+            adapter._record_cost({
+                "cost": 0.001 * (i + 1),
+                "provider": f"provider_{i}",
+                "model": f"model_{i}",
+                "tokens_in": 100,
+                "tokens_out": 50,
+            })
+        history = adapter.cost_history
+        assert len(history) == 3
+        assert history[0]["cost"] == 0.001
+        assert history[2]["cost"] == 0.003
+        # 确认是副本（修改不影响内部状态）
+        history.append({"fake": True})
+        assert len(adapter._cost_log) == 3
+
+    def test_get_total_cost(self):
+        """get_total_cost 返回累计成本。"""
+        adapter = OmniRouteAdapter()
+        adapter._record_cost({"cost": 0.001, "provider": "a", "model": "m",
+                              "tokens_in": 10, "tokens_out": 5})
+        adapter._record_cost({"cost": 0.002, "provider": "b", "model": "m",
+                              "tokens_in": 10, "tokens_out": 5})
+        adapter._record_cost({"cost": None, "provider": "c", "model": "m",
+                              "tokens_in": 10, "tokens_out": 5})
+        assert adapter.get_total_cost() == 0.003
+
+    def test_get_total_cost_empty(self):
+        """无记录时累计成本为 0。"""
+        adapter = OmniRouteAdapter()
+        assert adapter.get_total_cost() == 0.0
+
+
+class TestOmniRouteCostInChat:
+    """测试 cost 监控在 chat() 和 chat_with_fallback_info() 中的集成。"""
+
+    async def test_chat_injects_cost_into_usage(self):
+        """chat() 应将 cost 信息注入 usage。"""
+        adapter = OmniRouteAdapter()
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": "Hello!"}}],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
+        }
+        mock_response.raise_for_status = MagicMock()
+        mock_response.headers = {
+            "x-omniroute-response-cost": "0.0001",
+            "x-omniroute-provider": "groq",
+            "x-omniroute-model": "llama-3-70b",
+            "x-omniroute-tokens-in": "5",
+            "x-omniroute-tokens-out": "3",
+        }
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_response)
+
+        with patch.object(adapter, "_get_client", return_value=mock_client):
+            response = await adapter.chat(
+                messages=[{"role": "user", "content": "Hi"}],
+                tools=[],
+                system_prompt="",
+            )
+
+        assert "cost" in response.usage
+        assert response.usage["cost"]["cost"] == 0.0001
+        assert response.usage["cost"]["provider"] == "groq"
+        assert response.usage["cost"]["model"] == "llama-3-70b"
+        assert response.usage["cost"]["tokens_in"] == 5
+        assert response.usage["cost"]["tokens_out"] == 3
+        assert len(adapter.cost_history) == 1
+
+    async def test_chat_no_cost_headers(self):
+        """无 cost 头时 usage 不包含 cost 键。"""
+        adapter = OmniRouteAdapter()
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": "Hello!"}}],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
+        }
+        mock_response.raise_for_status = MagicMock()
+        mock_response.headers = {}
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_response)
+
+        with patch.object(adapter, "_get_client", return_value=mock_client):
+            response = await adapter.chat(
+                messages=[{"role": "user", "content": "Hi"}],
+                tools=[],
+                system_prompt="",
+            )
+
+        assert "cost" not in response.usage
+        assert len(adapter.cost_history) == 1
+        assert adapter.get_total_cost() == 0.0
+
+    async def test_chat_with_fallback_info_includes_cost(self):
+        """chat_with_fallback_info 应在 info 中包含 cost。"""
+        adapter = OmniRouteAdapter()
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": "Hello!"}}],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
+            "provider": "openai",
+            "model_used": "gpt-4o",
+            "fallback_triggered": False,
+        }
+        mock_response.raise_for_status = MagicMock()
+        mock_response.headers = {
+            "x-omniroute-response-cost": "0.005",
+            "x-omniroute-provider": "openai",
+            "x-omniroute-model": "gpt-4o",
+            "x-omniroute-tokens-in": "5",
+            "x-omniroute-tokens-out": "3",
+        }
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_response)
+
+        with patch.object(adapter, "_get_client", return_value=mock_client):
+            llm_resp, info = await adapter.chat_with_fallback_info(
+                messages=[{"role": "user", "content": "Hi"}],
+                tools=[],
+                system_prompt="",
+            )
+
+        assert info["provider"] == "openai"
+        assert "cost" in info
+        assert info["cost"]["cost"] == 0.005
+
+    async def test_chat_cost_with_backend_persistence(self):
+        """chat() 配合 cost_backend 时应持久化 cost 记录。"""
+        adapter = OmniRouteAdapter()
+        mock_backend = MagicMock()
+        mock_backend.set = MagicMock()
+        adapter.cost_backend = mock_backend
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "choices": [{"message": {"content": "Hello!"}}],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
+        }
+        mock_response.raise_for_status = MagicMock()
+        mock_response.headers = {
+            "x-omniroute-response-cost": "0.001",
+            "x-omniroute-provider": "deepseek",
+            "x-omniroute-model": "deepseek-chat",
+            "x-omniroute-tokens-in": "10",
+            "x-omniroute-tokens-out": "5",
+        }
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_response)
+
+        with patch.object(adapter, "_get_client", return_value=mock_client):
+            await adapter.chat(
+                messages=[{"role": "user", "content": "Hi"}],
+                tools=[],
+                system_prompt="",
+            )
+
+        mock_backend.set.assert_called_once()
+        persisted = mock_backend.set.call_args[0][1]
+        assert persisted["cost"] == 0.001
+        assert persisted["provider"] == "deepseek"

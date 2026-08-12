@@ -106,7 +106,8 @@ def create_llm(provider: str, **kwargs: Any) -> LLMInterface:
         # 否则创建 OmniRouteAdapter 作为底层
         adapter_kwargs = {k: v for k, v in kwargs.items()
                           if k in ("api_key", "base_url", "model", "temperature",
-                                    "max_tokens", "timeout", "max_retries", "retry_interval")}
+                                    "max_tokens", "timeout", "max_retries", "retry_interval",
+                                    "cost_backend")}
         inner_adapter = OmniRouteAdapter(**adapter_kwargs)
         router_kwargs = {k: v for k, v in kwargs.items()
                          if k in ("model_tiers", "strategy", "enable_fallback",

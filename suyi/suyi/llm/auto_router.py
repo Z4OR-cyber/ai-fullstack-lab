@@ -277,11 +277,13 @@ _MODEL_TIER_KEYWORDS: dict[ModelTier, list[str]] = {
     ModelTier.SIMPLE: [
         "flash", "mini", "nano", "haiku", "small", "lite", "tiny",
         "fast", "turbo-instruct", "8b", "7b", "1b", "3b",
+        "best-free",  # OmniRoute auto/best-free 变体
     ],
     ModelTier.COMPLEX: [
         "o1", "o3", "opus", "ultra", "max", "thinking", "reasoning",
         "pro-1.5", "pro-preview", "405b", "70b", "frontier",
         "claude-3-opus", "gpt-4-turbo", "gpt-4.5",
+        "auto/coding",  # OmniRoute auto/coding 变体（质量优先编码）
     ],
     ModelTier.STANDARD: [
         "4o", "sonnet", "chat", "pro", "plus", "medium", "balanced",
@@ -344,21 +346,16 @@ class ModelClassifier:
 # ═══════════════════════════════════════════════════════════════
 
 # 默认模型分层（当无法从OmniRoute动态发现时使用）
+# 使用 OmniRoute auto 变体，由 Gateway 自动路由到最佳 Provider
 _DEFAULT_MODEL_TIERS: dict[ModelTier, list[str]] = {
     ModelTier.SIMPLE: [
-        "google/gemini-flash-1.5",
-        "gpt-4o-mini",
-        "deepseek-chat",
+        "auto/best-free",       # 零成本路由（优先使用免费 Provider）
     ],
     ModelTier.STANDARD: [
-        "gpt-4o",
-        "anthropic/claude-3.5-sonnet",
-        "deepseek-coder",
+        "auto",                 # 默认 LKGP 路由（平衡质量与成本）
     ],
     ModelTier.COMPLEX: [
-        "openai/o1-preview",
-        "anthropic/claude-3-opus",
-        "gpt-4-turbo",
+        "auto/coding",          # 质量优先编码任务路由
     ],
 }
 

@@ -16,9 +16,10 @@ OmniRoute 是本地部署的 AI Gateway，暴露 OpenAI 兼容端点
     - 连接重试：OmniRoute 启动中时自动重试 3 次（间隔 2s）
 
 设计要点：
-    - API key 可选（本地部署可能不需要认证）
-    - 默认 model="auto"，由 OmniRoute 自动选择最优模型
-    - 认证方式灵活：有 key 则用 Bearer，无 key 则不发送 Authorization 头
+    - API key 默认使用已配置的 Gateway key，传入 "omniroute-local" 可禁用认证
+    - 默认 model="auto/best-free"，由 OmniRoute 自动路由到零成本 Provider
+    - 认证方式灵活：有 key 则用 Bearer，"omniroute-local" 则不发送 Authorization 头
+    - Cost 监控：自动从响应头提取路由成本信息，记录到日志和可选后端
     - 全部使用 httpx 异步调用，不引入新依赖
 
 Usage::
@@ -65,28 +66,34 @@ class OmniRouteAdapter(OpenAIAdapter):
 
     Attributes:
         base_url:       OmniRoute 服务地址，默认 http://localhost:20128/v1
-        model:          默认 "auto"，由 OmniRoute 自动路由
-        api_key:        可选，默认 "omniroute-local"
+        model:          默认 "auto/best-free"，由 OmniRoute 自动路由到零成本 Provider
+        api_key:        默认使用已配置的 Gateway key，传入 "omniroute-local" 可禁用认证
         max_retries:    连接重试次数，默认 3
         retry_interval: 重试间隔（秒），默认 2
+        cost_backend:   可选的 cost 持久化后端（如 SQLiteBackend），None 时仅记录日志
     """
+
+    # OmniRoute 默认 API key（已配置的本地 Gateway key）
+    _DEFAULT_API_KEY = "sk-ac3f703f89a3c4a7-e18773-1c0655db"
 
     def __init__(
         self,
         api_key: Optional[str] = None,
         base_url: str = "http://localhost:20128/v1",
-        model: str = "auto",
+        model: str = "auto/best-free",
         temperature: float = 0.7,
         max_tokens: int = 4096,
         timeout: float = 120.0,
         max_retries: int = 3,
         retry_interval: float = 2.0,
+        cost_backend: Any = None,
         **extra_kwargs: Any,
     ):
-        # OmniRoute 本地部署可能不需要 API key，给一个默认占位值
+        # OmniRoute API key — 默认使用已配置的 Gateway key
+        # 传入 "omniroute-local" 可禁用认证（无 auth 模式）
         # 父类 OpenAIAdapter.__init__ 会在 api_key 为空时报 ValueError，
         # 所以这里在调用 super().__init__ 前就处理好默认值
-        resolved_key = api_key or "omniroute-local"
+        resolved_key = api_key or self._DEFAULT_API_KEY
 
         super().__init__(
             api_key=resolved_key,
@@ -101,6 +108,12 @@ class OmniRouteAdapter(OpenAIAdapter):
         # OmniRoute 特有配置
         self.max_retries = max_retries
         self.retry_interval = retry_interval
+
+        # Cost 监控后端（任何实现了 set(key, value) 接口的对象，如 SQLiteBackend）
+        # 为 None 时仅记录日志
+        self.cost_backend = cost_backend
+        # 累计 cost 记录（内存缓存，供查询）
+        self._cost_log: list[dict[str, Any]] = []
 
     # ── 认证与请求头 ────────────────────────────────────────────
 
@@ -120,6 +133,110 @@ class OmniRouteAdapter(OpenAIAdapter):
         if self.api_key and self.api_key != "omniroute-local":
             headers["Authorization"] = f"Bearer {self.api_key}"
         return headers
+
+    # ── Cost 监控 ──────────────────────────────────────────────
+
+    @staticmethod
+    def _extract_cost_headers(response: httpx.Response) -> dict[str, Any]:
+        """
+        从 OmniRoute 响应头中提取 cost / 路由元数据。
+
+        OmniRoute 在响应头中附加以下字段：
+            - x-omniroute-response-cost  — 请求成本（USD）
+            - x-omniroute-provider       — 实际使用的 Provider
+            - x-omniroute-model          — 实际使用的模型
+            - x-omniroute-tokens-in      — 输入 token 数
+            - x-omniroute-tokens-out     — 输出 token 数
+
+        Args:
+            response: httpx.Response 对象
+
+        Returns:
+            Cost 信息字典，字段不存在时为 None
+        """
+        headers = response.headers
+
+        def _get_float(key: str) -> Optional[float]:
+            val = headers.get(key)
+            if val is None:
+                return None
+            try:
+                return float(val)
+            except (ValueError, TypeError):
+                return None
+
+        def _get_int(key: str) -> Optional[int]:
+            val = headers.get(key)
+            if val is None:
+                return None
+            try:
+                return int(val)
+            except (ValueError, TypeError):
+                return None
+
+        return {
+            "cost": _get_float("x-omniroute-response-cost"),
+            "provider": headers.get("x-omniroute-provider"),
+            "model": headers.get("x-omniroute-model"),
+            "tokens_in": _get_int("x-omniroute-tokens-in"),
+            "tokens_out": _get_int("x-omniroute-tokens-out"),
+        }
+
+    def _record_cost(self, cost_info: dict[str, Any]) -> None:
+        """
+        记录 cost 信息到日志和可选的后端存储。
+
+        - 始终记录到 Python logging（INFO 级别）
+        - 始终缓存到 self._cost_log 内存列表
+        - 如果 cost_backend 已配置，持久化到后端（如 SQLiteBackend）
+
+        Args:
+            cost_info: _extract_cost_headers 返回的字典
+        """
+        import time as _time
+
+        # 添加时间戳和请求模型
+        entry = {
+            "timestamp": _time.time(),
+            "request_model": self.model,
+            **cost_info,
+        }
+
+        # 缓存到内存
+        self._cost_log.append(entry)
+
+        # 日志记录
+        cost_str = f"${cost_info.get('cost', 0) or 0:.6f}" if cost_info.get("cost") is not None else "N/A"
+        logger.info(
+            "OmniRoute cost: %s | provider=%s model=%s "
+            "tokens_in=%s tokens_out=%s (request_model=%s)",
+            cost_str,
+            cost_info.get("provider", "unknown"),
+            cost_info.get("model", "unknown"),
+            cost_info.get("tokens_in", "N/A"),
+            cost_info.get("tokens_out", "N/A"),
+            self.model,
+        )
+
+        # 持久化到后端（如 SQLiteBackend）
+        if self.cost_backend is not None:
+            try:
+                key = f"cost_log:{entry['timestamp']:.6f}"
+                self.cost_backend.set(key, entry)
+            except Exception as e:
+                logger.warning("OmniRoute cost 持久化失败: %s", e)
+
+    @property
+    def cost_history(self) -> list[dict[str, Any]]:
+        """获取所有 cost 记录（内存缓存）。"""
+        return list(self._cost_log)
+
+    def get_total_cost(self) -> float:
+        """获取累计成本（USD）。"""
+        return round(
+            sum(e.get("cost", 0) or 0 for e in self._cost_log),
+            6,
+        )
 
     # ── 连接重试封装 ────────────────────────────────────────────
 
@@ -361,6 +478,10 @@ class OmniRouteAdapter(OpenAIAdapter):
 
         data = resp.json()
 
+        # ── Cost 监控：从响应头提取路由成本信息 ──────────────
+        cost_info = self._extract_cost_headers(resp)
+        self._record_cost(cost_info)
+
         # 提取内容、工具调用、用量（复用父类方法）
         choices = data.get("choices", [])
         content: Optional[str] = None
@@ -379,6 +500,10 @@ class OmniRouteAdapter(OpenAIAdapter):
 
         # 提取 OmniRoute 特有的 Provider 信息
         provider_info = self._extract_provider_info(data)
+
+        # 合并 cost 信息到 provider_info
+        if any(v is not None for v in cost_info.values()):
+            provider_info["cost"] = cost_info
 
         return llm_response, provider_info
 
@@ -437,6 +562,10 @@ class OmniRouteAdapter(OpenAIAdapter):
 
         data = resp.json()
 
+        # ── Cost 监控：从响应头提取路由成本信息 ──────────────
+        cost_info = self._extract_cost_headers(resp)
+        self._record_cost(cost_info)
+
         # 提取内容
         choices = data.get("choices", [])
         content: Optional[str] = None
@@ -452,6 +581,10 @@ class OmniRouteAdapter(OpenAIAdapter):
         provider_info = self._extract_provider_info(data)
         if provider_info:
             usage["omniroute"] = provider_info
+
+        # 将 cost 信息注入 usage（如果有有效数据）
+        if any(v is not None for v in cost_info.values()):
+            usage["cost"] = cost_info
 
         return LLMResponse(
             content=content,
