@@ -27,13 +27,14 @@ Usage::
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 from ..core.loop import LLMInterface
 from .openai_adapter import OpenAIAdapter
 from .anthropic_adapter import AnthropicAdapter
 from .omniroute_adapter import OmniRouteAdapter
 from .auto_router import AutoRouter
+from .prompt_sanitizer import PromptSanitizer
 
 
 # Registry of provider → adapter class
@@ -72,7 +73,12 @@ def register_provider(name: str, adapter_class: type) -> None:
     _PROVIDER_REGISTRY[name] = adapter_class
 
 
-def create_llm(provider: str, **kwargs: Any) -> LLMInterface:
+def create_llm(
+    provider: str,
+    *,
+    sanitizer: Optional[PromptSanitizer] = None,
+    **kwargs: Any,
+) -> LLMInterface:
     """
     Create an LLM adapter instance.
 
@@ -80,6 +86,11 @@ def create_llm(provider: str, **kwargs: Any) -> LLMInterface:
         provider: Provider name. Supported:
             - "openai" (also: deepseek, moonshot, together, groq, etc.)
             - "anthropic" (also: claude)
+            - "omniroute" (also: omni)
+            - "auto" (also: smart, router)
+        sanitizer: Optional PromptSanitizer for automatic prompt sanitization.
+            Only OmniRouteAdapter supports this parameter; passing it to
+            other providers will be ignored.
         **kwargs: Provider-specific arguments (api_key, model, base_url, etc.)
 
     Returns:
@@ -107,12 +118,16 @@ def create_llm(provider: str, **kwargs: Any) -> LLMInterface:
         adapter_kwargs = {k: v for k, v in kwargs.items()
                           if k in ("api_key", "base_url", "model", "temperature",
                                     "max_tokens", "timeout", "max_retries", "retry_interval",
-                                    "cost_backend")}
+                                    "cost_backend", "sanitizer")}
         inner_adapter = OmniRouteAdapter(**adapter_kwargs)
         router_kwargs = {k: v for k, v in kwargs.items()
                          if k in ("model_tiers", "strategy", "enable_fallback",
                                    "history_size", "enable_logging")}
         return AutoRouter(adapter=inner_adapter, **router_kwargs)
+
+    # sanitizer 透传（仅 OmniRouteAdapter 等支持此参数的 adapter 使用）
+    if sanitizer is not None:
+        kwargs["sanitizer"] = sanitizer
 
     adapter_class = _PROVIDER_REGISTRY[resolved]
     return adapter_class(**kwargs)

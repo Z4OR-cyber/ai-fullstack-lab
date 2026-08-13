@@ -52,6 +52,7 @@ import httpx
 
 from ..core.loop import LLMResponse, ToolCall
 from .openai_adapter import OpenAIAdapter
+from .prompt_sanitizer import PromptSanitizer
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +88,7 @@ class OmniRouteAdapter(OpenAIAdapter):
         max_retries: int = 3,
         retry_interval: float = 2.0,
         cost_backend: Any = None,
+        sanitizer: Optional[PromptSanitizer] = None,
         **extra_kwargs: Any,
     ):
         # OmniRoute API key — 默认使用已配置的 Gateway key
@@ -114,6 +116,10 @@ class OmniRouteAdapter(OpenAIAdapter):
         self.cost_backend = cost_backend
         # 累计 cost 记录（内存缓存，供查询）
         self._cost_log: list[dict[str, Any]] = []
+
+        # Prompt 脱敏器 — 在发送请求前自动清洗敏感信息
+        # 为 None 时不启用脱敏
+        self.sanitizer = sanitizer
 
     # ── 认证与请求头 ────────────────────────────────────────────
 
@@ -452,14 +458,14 @@ class OmniRouteAdapter(OpenAIAdapter):
         与 chat() 功能一致，但额外提取 OmniRoute 返回的
         Provider 路由信息（哪个 Provider 被实际使用、是否触发 fallback）。
 
-        Args:
-            messages:      对话消息列表
-            tools:         工具定义列表
-            system_prompt: 系统提示词
-
-        Returns:
-            (LLMResponse, provider_info) 元组
+        如果配置了 sanitizer，在构建请求前自动脱敏 messages 和 system_prompt。
         """
+        # ── Prompt 脱敏 ──────────────────────────────────────
+        if self.sanitizer is not None:
+            messages = self.sanitizer.sanitize_messages(messages)
+            if system_prompt:
+                system_prompt = self.sanitizer.sanitize(system_prompt)
+
         body = self._build_request_body(messages, tools, system_prompt, stream=False)
         url = f"{self.base_url}/chat/completions"
 
@@ -522,8 +528,15 @@ class OmniRouteAdapter(OpenAIAdapter):
         将 OmniRoute 返回的 Provider 元数据注入 usage 字段，
         以便调用方无需使用 chat_with_fallback_info 也能获取路由信息。
 
+        如果配置了 sanitizer，在构建请求前自动脱敏 messages 和 system_prompt。
         OmniRoute 可能在启动中，首次请求失败时会自动重试。
         """
+        # ── Prompt 脱敏 ──────────────────────────────────────
+        if self.sanitizer is not None:
+            messages = self.sanitizer.sanitize_messages(messages)
+            if system_prompt:
+                system_prompt = self.sanitizer.sanitize(system_prompt)
+
         body = self._build_request_body(messages, tools, system_prompt, stream=False)
         url = f"{self.base_url}/chat/completions"
 
@@ -604,8 +617,15 @@ class OmniRouteAdapter(OpenAIAdapter):
         继承父类的流式实现。OmniRoute 完全兼容 OpenAI SSE 格式，
         因此直接使用父类的 chat_stream 逻辑即可。
 
+        如果配置了 sanitizer，在构建请求前自动脱敏 messages 和 system_prompt。
         如果首次连接失败，会自动重试。
         """
+        # ── Prompt 脱敏 ──────────────────────────────────────
+        if self.sanitizer is not None:
+            messages = self.sanitizer.sanitize_messages(messages)
+            if system_prompt:
+                system_prompt = self.sanitizer.sanitize(system_prompt)
+
         body = self._build_request_body(messages, tools, system_prompt, stream=True)
         url = f"{self.base_url}/chat/completions"
 

@@ -31,6 +31,7 @@ from .auto_router import (
     TaskComplexity,
     RoutingDecision,
 )
+from .prompt_sanitizer import PromptSanitizer
 from .factory import (
     create_llm,
     create_llm_from_config,
@@ -47,6 +48,7 @@ __all__ = [
     "ModelClassifier",
     "TaskComplexity",
     "RoutingDecision",
+    "PromptSanitizer",
     "create_llm",
     "create_llm_from_config",
     "register_provider",
