@@ -10,6 +10,7 @@ Supporting types:
     Budget:     BudgetConfig, BudgetStatus, BudgetLevel
     Context:    AssembledContext, ToolDefinition, IdentityConfig, ProjectRules,
                 MemoryBackend, InMemoryBackend
+    Goal:       StructuredGoal, Priority
     Loop:       LLMInterface, LLMResponse, ToolCall, MockLLM,
                 Tool, FunctionTool, Middleware,
                 LoopState, LoopResult, ToolResult
@@ -30,6 +31,7 @@ from .context import (
     MemoryBackend,
     InMemoryBackend,
 )
+from .goal import StructuredGoal, Priority
 from .loop import (
     AgentLoop,
     LLMInterface,
@@ -60,6 +62,9 @@ __all__ = [
     "ProjectRules",
     "MemoryBackend",
     "InMemoryBackend",
+    # Goal types
+    "StructuredGoal",
+    "Priority",
     # Loop types
     "LLMInterface",
     "LLMResponse",

@@ -96,12 +96,15 @@ class RoutingDecision:
     score_breakdown: dict[str, int] = field(default_factory=dict)
     # 任务摘要（前100字符）
     task_summary: str = ""
+    # 权限感知：是否需要可信模型（敏感操作强制使用 STANDARD+ 层级）
+    requires_trusted_model: bool = False
 
     def __repr__(self) -> str:
         status = "✓" if self.success else "✗"
         fb = f" (fallback→{self.selected_model})" if self.fallback_used else ""
+        trusted = " [trusted]" if self.requires_trusted_model else ""
         return (
-            f"RoutingDecision[{status}] "
+            f"RoutingDecision[{status}]{trusted} "
             f"score={self.complexity_score} tier={self.tier.value} "
             f"model={self.selected_model}{fb} "
             f"latency={self.latency_ms:.0f}ms"
@@ -136,6 +139,34 @@ _SIMPLICITY_KEYWORDS: list[str] = [
     "hello", "hi", "thanks", "ok", "summarize", "translate", "format",
     "list", "name", "what is",
     "你好", "谢谢", "总结", "翻译", "格式化", "列出", "是什么",
+]
+
+# 敏感操作关键词 — 命中任意一个即需要可信模型（STANDARD+ 层级）
+# 这些操作涉及写入、执行、安全等高风险场景，不允许使用免费/低质量模型
+_SENSITIVE_OPERATION_KEYWORDS: list[str] = [
+    # 文件写入/修改
+    "write_file", "create_file", "edit_file", "delete_file",
+    "write_to_file", "save_file", "overwrite", "file_write",
+    "写入文件", "创建文件", "修改文件", "删除文件", "保存文件",
+    # 代码执行
+    "execute_code", "run_code", "exec(", "eval(", "subprocess",
+    "os.system", "shell_exec", "bash", "run_command",
+    "执行代码", "运行代码", "执行命令", "运行命令",
+    # 安全审计
+    "security_audit", "vulnerability_scan", "penetration_test",
+    "安全审计", "漏洞扫描", "渗透测试",
+    # 数据库操作
+    "execute_sql", "drop_table", "alter_table", "delete_from",
+    "update_set", "insert_into", "truncate", "db_migrate",
+    "执行SQL", "删除表", "修改表结构", "数据库迁移",
+    # 系统配置
+    "system_config", "set_env", "modify_config", "change_permissions",
+    "chmod", "chown", "registry_edit",
+    "系统配置", "修改权限", "环境变量",
+    # 凭证处理
+    "api_key", "secret_key", "password", "credential", "token_refresh",
+    "encrypt", "decrypt", "private_key", "certificate",
+    "密码", "密钥", "凭证", "加密", "解密", "私钥", "证书",
 ]
 
 
@@ -260,12 +291,51 @@ class TaskComplexity:
         else:
             breakdown["system_prompt"] = 2
 
+        # ── 6. 敏感操作检测 ─────────────────────────────
+        # 检测是否存在需要可信模型的敏感操作
+        sensitive_hits = sum(
+            1 for kw in _SENSITIVE_OPERATION_KEYWORDS if kw in all_text
+        )
+        breakdown["trusted_model_required"] = sensitive_hits
+
         # ── 汇总 ────────────────────────────────────────
-        raw_total = sum(breakdown.values())
+        raw_total = sum(
+            v for k, v in breakdown.items() if k != "trusted_model_required"
+        )
         # 归一化到 0-100（理论最大约 155）
         score = min(int(raw_total / 155 * 100), 100)
 
         return score, breakdown
+
+    @staticmethod
+    def detect_sensitive_operations(
+        messages: list[dict],
+        system_prompt: str,
+    ) -> bool:
+        """
+        检测消息中是否包含敏感操作关键词。
+
+        遍历所有消息内容和系统提示，检查是否包含敏感操作关键词
+        （如文件写入、代码执行、数据库操作、凭证处理等）。
+
+        Args:
+            messages:      对话消息列表
+            system_prompt: 系统提示词
+
+        Returns:
+            True = 存在敏感操作，需要可信模型
+        """
+        all_text = (system_prompt or "").lower()
+        for msg in messages:
+            content = msg.get("content", "")
+            if isinstance(content, str):
+                all_text += " " + content.lower()
+            elif isinstance(content, list):
+                for part in content:
+                    if isinstance(part, dict) and "text" in part:
+                        all_text += " " + part["text"].lower()
+
+        return any(kw in all_text for kw in _SENSITIVE_OPERATION_KEYWORDS)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -529,6 +599,18 @@ class AutoRouter:
         score, breakdown = TaskComplexity.estimate(messages, tools, system_prompt)
         tier = ModelTier.from_score(score)
 
+        # 权限感知：检测敏感操作，强制使用 STANDARD+ 层级
+        requires_trusted = TaskComplexity.detect_sensitive_operations(
+            messages, system_prompt,
+        )
+        if requires_trusted and tier == ModelTier.SIMPLE:
+            # 敏感操作不允许使用 SIMPLE 层（免费模型），提升到 STANDARD
+            tier = ModelTier.STANDARD
+            if self.enable_logging:
+                logger.info(
+                    "AutoRouter 权限感知: 敏感操作检测到，强制提升到 STANDARD 层级"
+                )
+
         # 2. 生成任务摘要
         task_summary = self._extract_summary(messages, system_prompt)
 
@@ -626,6 +708,7 @@ class AutoRouter:
             latency_ms=latency_ms,
             score_breakdown=breakdown,
             task_summary=task_summary,
+            requires_trusted_model=requires_trusted,
         )
         self.last_decision = decision
         self.history.append(decision)
@@ -655,6 +738,18 @@ class AutoRouter:
         """
         score, breakdown = TaskComplexity.estimate(messages, tools, system_prompt)
         tier = ModelTier.from_score(score)
+
+        # 权限感知：流式模式同样检测敏感操作
+        requires_trusted = TaskComplexity.detect_sensitive_operations(
+            messages, system_prompt,
+        )
+        if requires_trusted and tier == ModelTier.SIMPLE:
+            tier = ModelTier.STANDARD
+            if self.enable_logging:
+                logger.info(
+                    "AutoRouter 权限感知(流式): 敏感操作检测到，强制提升到 STANDARD 层级"
+                )
+
         selected_model = self._select_model(tier)
 
         if hasattr(self.adapter, "model"):
@@ -683,6 +778,7 @@ class AutoRouter:
                 latency_ms=latency_ms,
                 score_breakdown=breakdown,
                 task_summary=task_summary,
+                requires_trusted_model=requires_trusted,
             )
             self.last_decision = decision
             self.history.append(decision)
@@ -699,6 +795,7 @@ class AutoRouter:
                 latency_ms=latency_ms,
                 score_breakdown=breakdown,
                 task_summary=task_summary,
+                requires_trusted_model=requires_trusted,
             )
             self.last_decision = decision
             self.history.append(decision)
