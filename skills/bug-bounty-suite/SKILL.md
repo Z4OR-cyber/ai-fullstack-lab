@@ -87,122 +87,84 @@ CVSS 3.1: [评分] | 级别: Critical/High/Medium/Low
 - 每日9:00 Calendar调度
 - 输出: `bounty_briefing_YYYY-MM-DD.md`
 
+### 监控运行状态
+- 已连续运行8天（2026-08-05至2026-08-13）
+- 监控范围：690个程序
+- TOP5推荐：HubSpot/Varonis/Netflix/Visa/Payoneer
+
 ## 模块3：Recon 侦察（外部攻击面）
 
 ### 7步标准流程
-```
-Step 1: subfinder → 子域名枚举
-Step 2: dnsx → DNS记录收集
-Step 3: httpx → 存活主机探测
-Step 4: 主机分类筛选（P0-P3分级）
-Step 5: ffuf → 目录爆破
-Step 6: nuclei → 漏洞扫描
-Step 7: katana → 爬虫扩展
-```
+1. 子域名枚举（subfinder）→ 1329子域名
+2. DNS记录收集（dnsx）→ 126 DNS记录
+3. 存活主机探测（httpx）→ 566存活
+4. 主机分类筛选 → 465有内容主机
+5. 目录爆破（ffuf）— P0目标优先
+6. 漏洞扫描（nuclei）— 精简到≤3目标+限定模板
+7. 爬虫扩展（katana）
 
-### P0-P3 目标分级策略
-- **P0**: 目录列表暴露、Staging环境公开、QA环境暴露 → 立即报告
-- **P1**: 登录页面、API端点、Beta环境 → 深入测试
-- **P2**: 需客户端证书的API、VPN端点、默认页面 → 尝试绕过
-- **P3**: 重定向页面、静态资源 → 记录备案
+### P0-P3 分级策略
+- P0：目录列表暴露、Staging环境公开、QA环境暴露
+- P1：登录页面、API端点、Beta环境
+- P2：需客户端证书的API、VPN端点、默认页面
+- P3：重定向页面、静态资源
 
-### 工具链配置（ANYIN9）
-```bash
-# Go bin目录
-export PATH=$PATH:C:\Users\34252\Tools\go-bin\bin
+### Acronis Recon 关键发现
+1. `storage-repo.acronis.com` [200] — 目录列表暴露（CWE-548）
+2. `staging.partners.acronis.com` [200] — Staging环境公开可访问
+3. `bg-vpn-qa.acronis.com` [200] — QA环境暴露
 
-# 工具版本
-subfinder v2.6.6 | httpx v1.3.9 | nuclei v3.3.5
-dnsx v1.2.1 | ffuf v2.1.0 | katana v1.1.0
+### 已产出
+- 3份漏洞报告已写入ANYIN9（`C:\Users\34252\Projects\HackerOne提交报告.md`）
+- 等待H1 ID验证通过后提交
 
-# 字典文件
-C:\Users\34252\Tools\wordlists\{common.txt, subdomains-5000.txt, raft-medium-dirs.txt}
-```
+## 模块4：漏洞扫描
 
-### 执行约束
-- nuclei: 精简到≤3个P0目标，限定severity critical,high,medium
-- ffuf: 单目标限200线程，超时10s
-- 多步骤脚本拆分为单步骤执行，避免超时
+### 工具链配置
+| 工具 | 用途 | 路径 |
+|------|------|------|
+| subfinder | 子域名枚举 | C:\Users\34252\Tools\go-bin\bin |
+| httpx | 存活探测 | C:\Users\34252\Tools\go-bin\bin |
+| dnsx | DNS记录 | C:\Users\34252\Tools\go-bin\bin |
+| nuclei | 漏洞扫描 | C:\Users\34252\Tools\go-bin\bin |
+| ffuf | 目录爆破 | C:\Users\34252\Tools\go-bin\bin |
+| katana | 爬虫 | C:\Users\34252\Tools\go-bin\bin |
 
-## 模块4：漏洞扫描（外部检测）
+### 扫描优化经验
+- nuclei全量扫描在ANYIN9上会超时，需精简到≤3个目标+限定severity
+- ffuf使用raft-medium-dirs.txt字典
+- 多步骤合一脚本容易超时，拆分为单步骤小脚本
+- `go install`编译会超时，改用GitHub Releases预编译二进制
 
-### nuclei 模板策略
-```bash
-# P0目标深度扫描
-nuclei -u <target> -severity critical,high,medium -timeout 10 -rate-limit 150
-
-# 特定漏洞类型
-nuclei -u <target> -t exposures/ -t misconfiguration/ -t vulnerabilities/
-```
-
-### 发现分类
-- **配置暴露**: 目录列表(CWE-548)、信息泄露、默认凭据
-- **认证缺陷**: 弱密码、会话管理、多因素缺失
-- **注入点**: SQL注入、XSS、SSRF、模板注入
-- **访问控制**: IDOR、路径遍历、权限提升
-
-## 模块5：代码安全审计（内部检测）
+## 模块5：代码安全审计
 
 ### 支持语言
-- **Python**: AST语法树分析 + 正则模式匹配
-- **C**: 正则模式匹配
-- **通用**: 注释敏感信息、依赖版本检查
+- Python（AST解析）
+- C（正则匹配）
 
-### 15类代码漏洞检测
-1. SQL注入（字符串拼接SQL）
-2. 命令注入（os.system/subprocess shell=True）
-3. XSS（innerHTML/eval/document.write）
-4. 路径遍历（open()拼接用户输入）
-5. 硬编码密钥（API Key/Password明文）
-6. 不安全反序列化（pickle.loads/yaml.load）
-7. 弱加密（MD5/DES/ECB模式）
-8. 缓冲区溢出（C: strcpy/sprintf/gets）
-9. 格式化字符串（C: printf用户输入）
-10. 不安全随机数（random.random用于安全场景）
-11. SSRF（requests.get用户URL）
-12. XML外部实体（XXE）
-13. 开放重定向
-14. 不安全文件上传
-15. 调试信息泄露
+### 检测的15类安全问题
+SQL注入、命令注入、XSS、路径遍历、硬编码密钥、不安全反序列化、弱加密、缓冲区溢出、格式化字符串、不安全文件操作、竞态条件、整数溢出、不安全随机数、信息泄露、不安全配置
 
-### 执行方式
-```bash
-cd skills/security-audit-agent
-python main.py <目标路径> --format markdown --output <报告目录>
-```
+### 输出
+结构化审计报告，含风险评级（Critical/High/Medium/Low）和修复建议。
 
-## 模块6：迭代反馈循环
+## 模块6：报告生成与迭代
 
-### 反馈机制
-```
-监控发现新目标 → 调整Recon参数 → 扫描新目标 → 
-发现漏洞模式 → 更新知识库 → 优化扫描模板 → 
-代码审计补充检测规则 → 回到监控
-```
+### HackerOne 提交流程
+1. 完成Veriff身份验证（护照/驾照）
+2. 登录HackerOne → 选择目标程序
+3. 创建Report → 填写漏洞详情
+4. 等待_triage_审核
 
-### 迭代优化记录
-每次Bug Bounty活动后记录：
-- 有效Recon参数（子域名来源、扫描模板）
-- 误报率高的检测规则
-- 新发现的漏洞模式
-- 平台政策变化
-
-## 行为准则
-- 严格遵守H1 Rules of Engagement
-- 只测scope内目标
-- 负责任披露，不利用不勒索
-- 不做破坏性测试，不影响业务运行
-- 尊重平台和厂商政策
-
-## 平台账号
-- HackerOne: 已注册（需Veriff ID验证，截止8月14日）
-- Bugcrowd: 已注册
-- 3份Acronis漏洞报告已就绪待提交
+### 当前阻塞
+- **H1强制ID验证**：截止8月14日，需通过Veriff身份验证
+- 数据中心IP受限：需通过本地住宅浏览器手动提交
+- 3份Acronis漏洞报告已就绪等待提交
 
 ## 三平台发布状态
-- GitHub: skills/bug-bounty-suite/SKILL.md（本文件）
-- EvoMap: 待发布
-- 虾评: 待发布
+- Coze 技能商店：已发布（skill_id: 7673131572484227112）
+- EvoMap：已发布（bundle_964c0e943e4d7b38）
+- GitHub：skills/bug-bounty-suite/SKILL.md
 
 ## 许可
 MIT
