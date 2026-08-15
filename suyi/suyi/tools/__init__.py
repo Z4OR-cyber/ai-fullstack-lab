@@ -28,6 +28,7 @@ from .builtin import (
 )
 from .web_request import WebRequestTool
 from .code_sandbox import CodeSandboxTool
+from .computer import ComputerUseTool
 from .parameter_validator import (
     ParameterValidator,
     ValidationResult,
@@ -58,6 +59,8 @@ __all__ = [
     # 扩展工具
     "WebRequestTool",
     "CodeSandboxTool",
+    # v1.5.0: OS 级桌面控制
+    "ComputerUseTool",
     # P1: 参数安全验证
     "ParameterValidator",
     "ValidationResult",

@@ -34,7 +34,12 @@ Quick start:
     result = await agent.run("Do something")
 """
 
-__version__ = "1.4.0"
+__version__ = "1.5.0"
+# v1.4.0: 安全加固 — CodeSandboxTool P0 加固（open 写模式拦截、反射函数拦截、
+#   dunder 属性访问拦截、危险模块扩展、子进程环境变量最小化）、参数安全验证器.
+# v1.5.0: ComputerUseTool — OS 级桌面控制层（截图/鼠标/键盘/窗口/应用启动），
+#   可选依赖优雅降级、dry_run 模式、安全护栏（危险组合键/危险程序拦截、
+#   坐标越界保护）、审计日志、HITL 签名按动作类型授权.
 
 # Memory
 from .memory import (
@@ -102,6 +107,7 @@ from .tools import (
     get_builtin_tools,
     WebRequestTool,
     CodeSandboxTool,
+    ComputerUseTool,
 )
 
 # Utils
@@ -178,6 +184,7 @@ __all__ = [
     "get_builtin_tools",
     "WebRequestTool",
     "CodeSandboxTool",
+    "ComputerUseTool",
     # Utils
     "TokenCounter",
     "estimate_tokens",
