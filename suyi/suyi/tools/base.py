@@ -138,7 +138,15 @@ class AgentTool(ABC):
         description: 人类可读描述，供模型选择工具.
         default_permission: 默认权限级别：``'auto'`` / ``'confirm'`` / ``'block'``.
         parameters: 参数描述符列表.
+        read_only: v1.7.0 新增。是否为只读工具（无副作用）。
+            ``True`` 表示只读，可在 AgentLoop 中与其他只读工具并行执行；
+            ``False``（默认，保守策略）视为写工具，串行执行以保证互斥.
     """
+
+    # v1.7.0: 只读标记。与 suyi/core/loop.py 中 Tool.read_only 保持一致。
+    # 默认 False 是保守策略——未显式声明只读的工具一律按写工具串行，避免
+    # 误并发导致副作用冲突.
+    read_only: bool = False
 
     @property
     @abstractmethod

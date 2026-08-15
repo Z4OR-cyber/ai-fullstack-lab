@@ -39,6 +39,12 @@ from .context import (
     ToolDefinition,
     MemoryBackend,
 )
+# v1.7.0: 请求可重建自检（Harness 借鉴点 ②）
+from .request_checkpoint import (
+    RequestCheckpoint,
+    RequestReconstructionValidator,
+    RequestNotReconstructableError,
+)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -270,6 +276,10 @@ class Tool:
     description: str = ""
     parameters: dict = field(default_factory=lambda: {"type": "object", "properties": {}})
     default_permission: str = "auto"
+    # v1.7.0: 只读标记。read_only=True 的工具可并行执行；read_only=False
+    # （默认，保守策略）视为写工具，在 AgentLoop._execute_tools 中串行执行，
+    # 保证写操作不并发、互斥安全。借鉴 Harness 文章的执行调度思路.
+    read_only: bool = False
 
     async def run(self, **kwargs) -> str:
         """Execute the tool and return a string result."""
@@ -315,12 +325,20 @@ class FunctionTool(Tool):
         func: Callable[..., Any],
         parameters: Optional[dict] = None,
         default_permission: str = "auto",
+        read_only: Optional[bool] = None,
     ):
         self.name = name
         self.description = description
         self._func = func
         self.parameters = parameters or {"type": "object", "properties": {}}
         self.default_permission = default_permission
+        # v1.7.0: 标记工具是否只读。只读工具（如查询、搜索）可在
+        # _execute_tools 中并行执行；写工具（如创建、修改、删除）串行执行，
+        # 通过 asyncio.Lock 保证互斥。默认 None 表示"未显式设置"，此时
+        # 沿用类属性（子类可用类属性覆盖 read_only=True）；显式传 True/False
+        # 则写入实例属性，优先级最高.
+        if read_only is not None:
+            self.read_only = read_only
 
     async def run(self, **kwargs) -> str:
         result = self._func(**kwargs)
@@ -514,6 +532,11 @@ class AgentLoop:
         max_tool_retries: int = 2,
         permission_callback: Optional[PermissionCallback] = None,
         template: Any = None,
+        # ── v1.7.0: Harness 借鉴点 ② 请求可重建自检 ──────────
+        request_validator: Optional[RequestReconstructionValidator] = None,
+        enable_request_checkpoint: bool = False,
+        # ── v1.7.0: Harness 借鉴点 ③ 写工具互斥锁 ────────────
+        write_lock: Optional[asyncio.Lock] = None,
     ):
         self.llm = llm
         self.tools: dict[str, Tool] = {}
@@ -543,6 +566,27 @@ class AgentLoop:
         self._interrupt_requested: bool = False
         self._resume_state: Optional[tuple[list[dict], int]] = None
 
+        # ── v1.7.0: 请求可重建自检（Harness ②）──────────────
+        # 当 enable_request_checkpoint=True 时，每次调用 LLM 前用
+        # request_validator 对 (messages, tools, system_prompt) 做一次
+        # "序列化→反序列化→checksum 比对"。校验通过的 checkpoint 存入
+        # state.metadata["last_checkpoint"]；校验失败采用 fail-open 策略
+        # （记录 checkpoint_error 但不阻断 loop），因为校验本身的 bug
+        # 不应导致生产 agent 停摆。request_validator 为 None 时内部自动
+        # 创建一个默认实例（仅当 enable_request_checkpoint=True 时才使用）.
+        self.enable_request_checkpoint = enable_request_checkpoint
+        self.request_validator: RequestReconstructionValidator = (
+            request_validator or RequestReconstructionValidator()
+        )
+
+        # ── v1.7.0: 写工具串行锁（Harness ③）────────────────
+        # 所有 read_only=False 的工具在同一个 lock 内串行执行，保证写操作
+        # 不并发。外部可注入共享 lock（例如多个 AgentLoop 实例共用），
+        # 未注入则内部新建。注意：asyncio.Lock 必须在事件循环内创建/使用，
+        # 这里延迟到首次使用时绑定（见 _get_write_lock）.
+        self._write_lock_optional: Optional[asyncio.Lock] = write_lock
+        self._write_lock_bound: Optional[asyncio.Lock] = None
+
     # ── Tool Registration ──────────────────────────────────────
 
     def register_tool(self, tool: Tool) -> None:
@@ -559,6 +603,92 @@ class AgentLoop:
         self.context_assembler.tool_defs = [
             t.to_definition() for t in self.tools.values()
         ]
+
+    # ── v1.7.0: 请求可重建自检 & 写锁 ────────────────────────
+
+    def _get_write_lock(self) -> asyncio.Lock:
+        """获取写工具互斥锁（延迟绑定到当前事件循环）.
+
+        asyncio.Lock 在 Python 3.10 之前不能跨事件循环使用；为安全起见，
+        在首次调用时（已处于事件循环中）创建或复用 lock.
+        """
+        if self._write_lock_optional is not None:
+            return self._write_lock_optional
+        if self._write_lock_bound is None:
+            self._write_lock_bound = asyncio.Lock()
+        return self._write_lock_bound
+
+    def _checkpoint_request(
+        self,
+        messages: list[dict],
+        tools: list[dict],
+        system_prompt: str,
+        state: LoopState,
+        model_hint: Optional[str] = None,
+    ) -> Optional[RequestCheckpoint]:
+        """在发送 LLM 请求前做可重建自检（fail-open）.
+
+        策略：
+            - 若 ``enable_request_checkpoint`` 为 False，直接返回 None
+              （向后兼容，零开销）.
+            - 校验通过：把 checkpoint 写入 state.metadata["last_checkpoint"]
+              并清理上轮 checkpoint_error.
+            - 校验失败：采用 **fail-open** —— 记录 checkpoint_error 到
+              state.metadata，打日志，但 **不抛异常**，让 loop 继续发送请求.
+              理由：校验是安全网而非功能本身；若因校验器 bug 阻断 agent
+              生产流量，代价远大于降级为无校验运行. checkpoint_error 可供
+              审计/告警系统消费.
+
+        Args:
+            messages:      即将发给 LLM 的 messages.
+            tools:         工具字典列表.
+            system_prompt: 系统提示词.
+            state:         当前 loop state，用于写入 metadata.
+            model_hint:    模型标识（可选）.
+
+        Returns:
+            成功时返回 :class:`RequestCheckpoint`，未启用或失败时返回 None.
+        """
+        if not self.enable_request_checkpoint:
+            return None
+
+        try:
+            checkpoint = self.request_validator.validate(
+                messages=messages,
+                tools=tools,
+                system_prompt=system_prompt,
+                model_hint=model_hint,
+            )
+        except RequestNotReconstructableError as e:
+            # fail-open：记录错误但不阻断请求
+            state.metadata["checkpoint_error"] = {
+                "error": str(e),
+                "reason": e.reason,
+                "field_path": e.field_path,
+            }
+            print(
+                f"[RequestCheckpoint] VALIDATION FAILED (fail-open, "
+                f"request will still be sent): {e}",
+                flush=True,
+            )
+            return None
+        except Exception as e:
+            # 兜底：校验器自身出现非预期异常也不能炸 loop
+            state.metadata["checkpoint_error"] = {
+                "error": f"Validator internal error: {e}",
+                "reason": "internal_error",
+                "field_path": None,
+            }
+            print(
+                f"[RequestCheckpoint] INTERNAL ERROR (fail-open): {e}",
+                flush=True,
+            )
+            return None
+
+        # 校验通过：写入 checkpoint 并清理上轮错误
+        state.metadata["last_checkpoint"] = checkpoint.to_dict()
+        state.metadata.pop("checkpoint_error", None)
+        return checkpoint
 
     # ── Interrupt / Resume ─────────────────────────────────────
 
@@ -700,6 +830,14 @@ class AgentLoop:
 
             # ── ④ Call LLM (injectable interface) ──────────────
             tool_dicts = [td.to_dict() for td in context.tool_defs]
+            # v1.7.0: 请求可重建自检（Harness ②）——发送前做序列化→反序列化
+            # →checksum 比对。fail-open：失败不阻断请求，错误写入 state.metadata.
+            self._checkpoint_request(
+                messages=context.messages,
+                tools=tool_dicts,
+                system_prompt=context.system_prompt,
+                state=state,
+            )
             response = await self.llm.chat(
                 messages=context.messages,
                 tools=tool_dicts,
@@ -907,6 +1045,13 @@ class AgentLoop:
 
                 # ── Call LLM ──────────────────────────────────
                 tool_dicts = [td.to_dict() for td in context.tool_defs]
+                # v1.7.0: 请求可重建自检（Harness ②）—— fail-open
+                self._checkpoint_request(
+                    messages=context.messages,
+                    tools=tool_dicts,
+                    system_prompt=phase_prompt,
+                    state=state,
+                )
                 response = await self.llm.chat(
                     messages=context.messages,
                     tools=tool_dicts,
@@ -1095,59 +1240,108 @@ class AgentLoop:
         state: LoopState,
     ) -> list[ToolResult]:
         """
-        Execute tool calls in parallel with failure isolation.
+        执行工具调用（v1.7.0：只读并行 + 写工具串行 + 有序提交）.
 
-        Uses asyncio.gather(return_exceptions=True) — the Python equivalent
-        of Promise.allSettled — so one tool failure doesn't prevent others
-        from executing.
+        调度策略（借鉴 Harness 文章 ③）：
+            1. **分组**：按 ``tool.read_only`` 将 tool_calls 拆成两组，
+               保持各自在原列表中的相对顺序.
+            2. **只读组并行**：用 ``asyncio.gather(return_exceptions=True)``
+               并发执行所有 read_only=True 的工具，一个失败不影响其他.
+            3. **写组串行**：在 ``async with self._write_lock`` 内按原顺序
+               逐个 await 写工具。保证任意时刻只有一个写工具在执行，避免
+               并发写冲突（如同时写文件、同时改数据库）.
+            4. **有序提交**：两组全部完成后，用 ``tool_call_id`` 映射回
+               **原始 tool_calls 的顺序**，返回与输入顺序完全一致的
+               ``list[ToolResult]``。即使只读工具并行完成的先后不一，最终
+               history 中 tool 消息的顺序也与 LLM 请求的 tool_calls 对齐，
+               符合 OpenAI/Anthropic 等 API 对 tool 消息顺序的要求.
 
-        Stream-parse optimization note:
-            When streaming is implemented, permission pre-checks can start
-            as soon as tool names are recognized, before the full response
-            is parsed. Here we pre-check in the permission step of each tool.
+        异常隔离：
+            - gather 的 exception 转成 ``ToolResult(success=False)``；
+            - 串行写工具单个失败也包装为失败 ToolResult，不影响其他写工具.
+
+        Args:
+            tool_calls: LLM 请求的工具调用列表（顺序即提交顺序）.
+            state:      当前 loop state.
+
+        Returns:
+            与 ``tool_calls`` 顺序一致的 :class:`ToolResult` 列表.
         """
 
         async def execute_single(tc: ToolCall) -> ToolResult:
+            """执行单个工具调用（含权限检查、中间件、重试）."""
             return await self._execute_single_tool(tc, state)
 
-        # Parallel execution with failure isolation
-        raw_results = await asyncio.gather(
-            *[execute_single(tc) for tc in tool_calls],
-            return_exceptions=True,
-        )
-
-        # Convert any raw exceptions to error ToolResults
-        final_results: list[ToolResult] = []
-        for i, r in enumerate(raw_results):
-            if isinstance(r, Exception):
-                tc = tool_calls[i]
-                final_results.append(
-                    ToolResult(
-                        tool_call_id=tc.id,
-                        tool_name=tc.name,
-                        success=False,
-                        content=(
-                            f"Tool execution crashed with unexpected "
-                            f"error: {r}"
-                        ),
-                        attempts=0,
-                    )
-                )
-            elif isinstance(r, ToolResult):
-                final_results.append(r)
+        # ── ① 按 read_only 分组（保持原顺序）──────────────────
+        read_only_calls: list[tuple[int, ToolCall]] = []
+        write_calls: list[tuple[int, ToolCall]] = []
+        for idx, tc in enumerate(tool_calls):
+            tool = self.tools.get(tc.name)
+            # 未注册的工具归入写组（保守策略：串行执行，由 _execute_single_tool
+            # 返回 "tool not available" 错误）。已注册工具按 read_only 标记分组.
+            if tool is not None and getattr(tool, "read_only", False):
+                read_only_calls.append((idx, tc))
             else:
-                # Shouldn't happen, but handle gracefully
-                tc = tool_calls[i]
-                final_results.append(
-                    ToolResult(
-                        tool_call_id=tc.id,
-                        tool_name=tc.name,
-                        success=False,
-                        content="Tool execution returned unexpected result type.",
-                    )
-                )
+                write_calls.append((idx, tc))
 
+        # 用原索引映射最终结果，保证有序提交
+        indexed_results: dict[int, ToolResult] = {}
+
+        # ── ② 只读组：并行执行（return_exceptions 隔离失败）───
+        if read_only_calls:
+            read_only_results = await asyncio.gather(
+                *[execute_single(tc) for _, tc in read_only_calls],
+                return_exceptions=True,
+            )
+            for (orig_idx, tc), r in zip(read_only_calls, read_only_results):
+                indexed_results[orig_idx] = self._coerce_tool_result(tc, r)
+
+        # ── ③ 写组：在 write_lock 内串行执行 ─────────────────
+        if write_calls:
+            write_lock = self._get_write_lock()
+            async with write_lock:
+                for orig_idx, tc in write_calls:
+                    try:
+                        r = await execute_single(tc)
+                    except Exception as e:
+                        # 单个写工具抛异常也不中断后续写工具
+                        r = e
+                    indexed_results[orig_idx] = self._coerce_tool_result(tc, r)
+
+        # ── ④ 按原 tool_calls 顺序合并结果（有序提交）─────────
+        final_results: list[ToolResult] = [
+            indexed_results[i] for i in range(len(tool_calls))
+        ]
         return final_results
+
+    @staticmethod
+    def _coerce_tool_result(
+        tc: ToolCall,
+        result: Any,
+    ) -> ToolResult:
+        """把 gather 的原始返回值（ToolResult / Exception / 其他）统一转为
+        失败/成功的 :class:`ToolResult`.
+
+        这是 v1.7.0 从旧 ``_execute_tools`` 提取的异常隔离逻辑，供并行组
+        和串行组共用，避免重复代码.
+        """
+        if isinstance(result, ToolResult):
+            return result
+        if isinstance(result, Exception):
+            return ToolResult(
+                tool_call_id=tc.id,
+                tool_name=tc.name,
+                success=False,
+                content=f"Tool execution crashed with unexpected error: {result}",
+                attempts=0,
+            )
+        # 不应发生，但兜底
+        return ToolResult(
+            tool_call_id=tc.id,
+            tool_name=tc.name,
+            success=False,
+            content="Tool execution returned unexpected result type.",
+        )
 
     async def _execute_single_tool(
         self,

@@ -34,7 +34,7 @@ Quick start:
     result = await agent.run("Do something")
 """
 
-__version__ = "1.6.0"
+__version__ = "1.7.0"
 # v1.4.0: 安全加固 — CodeSandboxTool P0 加固（open 写模式拦截、反射函数拦截、
 #   dunder 属性访问拦截、危险模块扩展、子进程环境变量最小化）、参数安全验证器.
 # v1.5.0: ComputerUseTool — OS 级桌面控制层（截图/鼠标/键盘/窗口/应用启动），
@@ -45,6 +45,11 @@ __version__ = "1.6.0"
 #   可直接插入 ContextAssembler）+ 语义去重（skip/merge/append）+ 正样本
 #   蒸馏器 + 弱信号积累器（达阈值触发外循环蒸馏）+ 三级知识注入（原则/案例/
 #   专项）。FeedbackCollector 与 EvolutionOrchestrator 增量对接，向后兼容.
+# v1.7.0: Harness 借鉴 — ②请求可重建自检（RequestCheckpoint +
+#   RequestReconstructionValidator，发送前序列化→反序列化→checksum 比对，
+#   fail-open 不阻断生产）；③执行调度（read_only=True 只读工具并行、
+#   read_only=False 写工具在 asyncio.Lock 内串行、结果按 tool_calls 原始
+#   顺序有序提交）。纯增量、向后兼容，默认关闭新行为.
 
 # Memory
 from .memory import (

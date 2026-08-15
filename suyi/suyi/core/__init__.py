@@ -45,6 +45,12 @@ from .loop import (
     LoopResult,
     ToolResult,
 )
+# v1.7.0: 请求可重建自检
+from .request_checkpoint import (
+    RequestCheckpoint,
+    RequestReconstructionValidator,
+    RequestNotReconstructableError,
+)
 
 __all__ = [
     # Core classes
@@ -76,4 +82,8 @@ __all__ = [
     "LoopState",
     "LoopResult",
     "ToolResult",
+    # v1.7.0: request checkpoint
+    "RequestCheckpoint",
+    "RequestReconstructionValidator",
+    "RequestNotReconstructableError",
 ]
