@@ -28,6 +28,11 @@ from .builtin import (
 )
 from .web_request import WebRequestTool
 from .code_sandbox import CodeSandboxTool
+from .parameter_validator import (
+    ParameterValidator,
+    ValidationResult,
+    ValidationIssue,
+)
 
 __all__ = [
     # 基类
@@ -53,4 +58,8 @@ __all__ = [
     # 扩展工具
     "WebRequestTool",
     "CodeSandboxTool",
+    # P1: 参数安全验证
+    "ParameterValidator",
+    "ValidationResult",
+    "ValidationIssue",
 ]

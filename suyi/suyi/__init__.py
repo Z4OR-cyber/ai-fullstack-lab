@@ -34,7 +34,7 @@ Quick start:
     result = await agent.run("Do something")
 """
 
-__version__ = "0.8.0"
+__version__ = "1.4.0"
 
 # Memory
 from .memory import (

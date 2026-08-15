@@ -48,6 +48,8 @@ import base64
 import hashlib
 import hmac
 import json
+import os
+import secrets
 import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -69,6 +71,8 @@ class AuthConfig:
         jwt_secret:   JWT 签名密钥（HS256），为空则不启用 JWT.
         jwt_expiry:   JWT 有效期（秒），默认 3600（1 小时）.
         cors_origins: 允许的 CORS 来源列表，默认 ``["*"]``.
+        is_production: 是否为生产模式（默认 False，保持向后兼容）.
+                       生产模式下会强制安全要求（密钥强度、CORS 等）.
     """
 
     auth_enabled: bool = True
@@ -76,6 +80,104 @@ class AuthConfig:
     jwt_secret: str = ""
     jwt_expiry: int = 3600
     cors_origins: list[str] = field(default_factory=lambda: ["*"])
+    is_production: bool = False
+
+    # ── P2 加固：从环境变量构建配置 ──────────────────────────
+
+    @classmethod
+    def from_env(cls) -> "AuthConfig":
+        """从环境变量读取配置构建 AuthConfig.
+
+        读取的环境变量:
+            - ``SUYI_AUTH_ENABLED``: 是否启用认证（"true"/"false"，默认 "true"）
+            - ``SUYI_API_KEYS``: 逗号分隔的 API Key 列表
+            - ``SUYI_JWT_SECRET``: JWT 签名密钥
+            - ``SUYI_JWT_EXPIRY``: JWT 有效期秒数（默认 "3600"）
+            - ``SUYI_CORS_ORIGINS``: 逗号分隔的 CORS 来源（默认 "*"）
+            - ``SUYI_IS_PRODUCTION``: 是否生产模式（"true"/"false"，默认 "false"）
+
+        Returns:
+            从环境变量构建的 AuthConfig 实例.
+        """
+        auth_enabled: bool = os.environ.get(
+            "SUYI_AUTH_ENABLED", "true"
+        ).strip().lower() in ("true", "1", "yes", "on")
+
+        api_keys_str: str = os.environ.get("SUYI_API_KEYS", "")
+        api_keys: list[str] = [
+            k.strip() for k in api_keys_str.split(",") if k.strip()
+        ]
+
+        jwt_secret: str = os.environ.get("SUYI_JWT_SECRET", "")
+
+        jwt_expiry_str: str = os.environ.get("SUYI_JWT_EXPIRY", "3600")
+        try:
+            jwt_expiry: int = int(jwt_expiry_str)
+        except ValueError:
+            jwt_expiry = 3600
+
+        cors_str: str = os.environ.get("SUYI_CORS_ORIGINS", "*")
+        cors_origins: list[str] = [
+            o.strip() for o in cors_str.split(",") if o.strip()
+        ]
+        if not cors_origins:
+            cors_origins = ["*"]
+
+        is_production: bool = os.environ.get(
+            "SUYI_IS_PRODUCTION", "false"
+        ).strip().lower() in ("true", "1", "yes", "on")
+
+        return cls(
+            auth_enabled=auth_enabled,
+            api_keys=api_keys,
+            jwt_secret=jwt_secret,
+            jwt_expiry=jwt_expiry,
+            cors_origins=cors_origins,
+            is_production=is_production,
+        )
+
+    # ── P2 加固：生成安全密钥 ────────────────────────────────
+
+    @staticmethod
+    def generate_secure_secret(length: int = 48) -> str:
+        """生成安全的随机密钥.
+
+        使用 ``secrets.token_urlsafe()`` 生成密码学安全的随机密钥.
+        生成的密钥适合用作 JWT 签名密钥.
+
+        Args:
+            length: 密钥的字节长度（默认 48，生成约 64 字符的 base64 字符串）.
+                    最终密钥长度取决于 base64 编码，约为 length * 4/3.
+
+        Returns:
+            URL-safe Base64 编码的随机密钥字符串.
+
+        Raises:
+            ValueError: 如果 length 不是正整数.
+        """
+        if not isinstance(length, int) or length <= 0:
+            raise ValueError("length 必须为正整数")
+        return secrets.token_urlsafe(length)
+
+
+# ═══════════════════════════════════════════════════════════════
+#  P2 加固：生产模式安全校验
+# ═══════════════════════════════════════════════════════════════
+
+# 常见弱密钥列表（生产模式禁止使用）
+_WEAK_JWT_SECRETS: set[str] = {
+    "secret",
+    "changeme",
+    "password",
+    "123456",
+    "default",
+    "jwt-secret",
+    "your-secret-key",
+    "SUYI_JWT_SECRET",
+}
+
+# JWT 密钥最小长度
+_MIN_JWT_SECRET_LENGTH: int = 32
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -137,6 +239,58 @@ class AuthManager:
 
     def __init__(self, config: Optional[AuthConfig] = None) -> None:
         self.config: AuthConfig = config or AuthConfig()
+
+        # P2 加固：生产模式安全校验
+        if self.config.is_production:
+            self._validate_production_config()
+
+    def _validate_production_config(self) -> None:
+        """生产模式安全配置校验.
+
+        在生产模式下强制执行以下安全要求:
+        1. jwt_secret 不能为空
+        2. jwt_secret 长度不能小于 32 字符
+        3. jwt_secret 不能是常见弱密钥
+        4. CORS 不能是 "*"（当 api_keys 非空时）
+        5. api_keys 不能为空列表
+
+        Raises:
+            ValueError: 如果任何安全要求不满足.
+        """
+        # 1. jwt_secret 不能为空
+        if not self.config.jwt_secret:
+            raise ValueError(
+                "生产模式下 jwt_secret 不能为空，"
+                "请使用 AuthConfig.generate_secure_secret() 生成安全密钥"
+            )
+
+        # 2. jwt_secret 长度不能小于 32 字符
+        if len(self.config.jwt_secret) < _MIN_JWT_SECRET_LENGTH:
+            raise ValueError(
+                f"生产模式下 jwt_secret 长度不能小于 {_MIN_JWT_SECRET_LENGTH} 字符，"
+                f"当前长度: {len(self.config.jwt_secret)}"
+            )
+
+        # 3. jwt_secret 不能是常见弱密钥
+        if self.config.jwt_secret in _WEAK_JWT_SECRETS:
+            raise ValueError(
+                f"生产模式下 jwt_secret 不能使用常见弱密钥: "
+                f"'{self.config.jwt_secret}'"
+            )
+
+        # 4. CORS 不能是 "*"（当 api_keys 非空时）
+        if self.config.api_keys and "*" in self.config.cors_origins:
+            raise ValueError(
+                "生产模式下当 api_keys 非空时，"
+                "CORS 不能配置为 '*'，请指定明确的允许来源"
+            )
+
+        # 5. api_keys 不能为空列表
+        if not self.config.api_keys:
+            raise ValueError(
+                "生产模式下 api_keys 不能为空列表，"
+                "请配置至少一个有效的 API Key"
+            )
 
     # ───────────────────────────────────────────────────────
     #  JWT 生成与验证
@@ -424,6 +578,42 @@ class AuthManager:
             "Access-Control-Allow-Headers": "Content-Type, Authorization, X-API-Key",
             "Access-Control-Max-Age": "3600",
         }
+
+    # ───────────────────────────────────────────────────────
+    #  P2 加固：安全响应头
+    # ───────────────────────────────────────────────────────
+
+    def security_headers(self, is_https: bool = True) -> dict[str, str]:
+        """返回安全响应头字典.
+
+        包含以下安全头:
+            - ``X-Content-Type-Options: nosniff``: 防止 MIME 嗅探
+            - ``X-Frame-Options: DENY``: 防止点击劫持
+            - ``X-XSS-Protection: 1; mode=block``: XSS 过滤
+            - ``Strict-Transport-Security``: HSTS（仅 HTTPS）
+            - ``Cache-Control: no-store``: API 响应不缓存
+
+        Args:
+            is_https: 是否为 HTTPS 连接（默认 True）.
+                      为 True 时包含 HSTS 头.
+
+        Returns:
+            安全响应头字典.
+        """
+        headers: dict[str, str] = {
+            "X-Content-Type-Options": "nosniff",
+            "X-Frame-Options": "DENY",
+            "X-XSS-Protection": "1; mode=block",
+            "Cache-Control": "no-store",
+        }
+
+        # HSTS 仅在 HTTPS 下发送
+        if is_https:
+            headers["Strict-Transport-Security"] = (
+                "max-age=31536000; includeSubDomains"
+            )
+
+        return headers
 
     # ───────────────────────────────────────────────────────
     #  令牌端点

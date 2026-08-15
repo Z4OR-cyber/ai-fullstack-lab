@@ -18,9 +18,12 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, TYPE_CHECKING
 
 from .manager import RiskLevel
+
+if TYPE_CHECKING:
+    from suyi.tools.parameter_validator import ParameterValidator
 
 
 # ── 风险评分 ──────────────────────────────────────────────────
@@ -163,6 +166,7 @@ class HITLPolicy:
         confirm_threshold: float = 0.6,
         enable_learning: bool = True,
         learning_window: int = 100,
+        parameter_validator: Optional["ParameterValidator"] = None,
     ) -> None:
         self.confirm_tools: Set[str] = (
             confirm_tools or set(_DEFAULT_CONFIRM_TOOLS)
@@ -173,6 +177,8 @@ class HITLPolicy:
         self.confirm_threshold: float = confirm_threshold
         self.enable_learning: bool = enable_learning
         self.learning_window: int = learning_window
+        # P1 加固：可选的参数安全验证器（None 表示不启用，保持向后兼容）
+        self.parameter_validator: Optional["ParameterValidator"] = parameter_validator
 
         # 学习历史
         self._learning_history: List[LearningRecord] = []
@@ -218,6 +224,26 @@ class HITLPolicy:
                             needs_confirm=False,
                         ),
                     )
+
+        # 1.5 P1 加固：参数安全验证（路径穿越 / 命令注入 / SSRF / 敏感文件）
+        if self.parameter_validator is not None:
+            validation = self.parameter_validator.validate(
+                tool_name, arguments
+            )
+            if validation.action == "block":
+                return PolicyDecision(
+                    action="block",
+                    reason=f"Parameter validation failed: {validation.reason}",
+                    risk_score=RiskScore(
+                        score=1.0,
+                        level=RiskLevel.CRITICAL,
+                        factors=[
+                            f"param_validation:{issue.category}"
+                            for issue in validation.issues
+                        ],
+                        needs_confirm=False,
+                    ),
+                )
 
         # 2. 工具名称策略
         tool_lower: str = tool_name.lower()

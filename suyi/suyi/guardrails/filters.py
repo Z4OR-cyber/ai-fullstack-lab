@@ -100,7 +100,93 @@ _INJECTION_PATTERNS: List[re.Pattern[str]] = [
     re.compile(r"(?:act|pretend|roleplay)\s+as\s+(?:if\s+you\s+(?:are|were)\s+)?(?:a|an)?\s*(?:different|new)\s+", re.I),
     re.compile(r"jailbreak", re.I),
     re.compile(r"DAN\s*mode", re.I),
+    # P3 加固：新增注入模式
+    # Base64 编码注入：base64 + decode 组合（距离 < 200 字符）
+    re.compile(
+        r"base64[\s\S]{0,200}?(?:decode|decrypt|atob)",
+        re.I,
+    ),
+    # Unicode/编码混淆：密集的 \u00 转义序列
+    re.compile(r"(?:\\u00[0-9a-fA-F]{2}){3,}"),
+    # Markdown/格式注入：#system、### instruction、---system---
+    re.compile(r"#{1,3}\s*system\b", re.I),
+    re.compile(r"#{1,3}\s*instruction\b", re.I),
+    re.compile(r"-{3,}\s*system\s*-{3,}", re.I),
+    # 角色扮演诱导扩展变体
+    re.compile(r"roleplay\s+as\b", re.I),
+    re.compile(r"pretend\s+to\s+be\b", re.I),
+    re.compile(r"act\s+as\s+if\s+you\s+are\b", re.I),
+    # 开发者模式
+    re.compile(r"developer\s+mode\b", re.I),
+    re.compile(r"\bdev\s+mode\b", re.I),
+    re.compile(r"debug\s+mode\b", re.I),
+    re.compile(r"enable\s+all\s+features\b", re.I),
+    # Token 走私：LLM 特殊 token
+    re.compile(r"\[/?INST\]"),
+    re.compile(r"<</?SYS>>"),
+    # 中文注入变体
+    re.compile(r"忽略以上"),
+    re.compile(r"忽略之前"),
+    re.compile(r"忽略上面"),
+    re.compile(r"无视"),
+    re.compile(r"忘记之前"),
+    re.compile(r"你现在是"),
+    re.compile(r"你是一个"),
+    re.compile(r"系统提示"),
+    re.compile(r"扮演"),
+    re.compile(r"假装你是"),
+    # 日文注入变体
+    re.compile(r"以前の指示"),
+    re.compile(r"無視して"),
+    re.compile(r"システムプロンプト"),
 ]
+
+# P3 加固：启发式评分用的组合模式
+_INJECTION_IGNORE_WORDS = re.compile(
+    r"\b(?:ignore|forget|disregard|do\s+not\s+follow|don'?t\s+follow|override)\b",
+    re.I,
+)
+_INJECTION_CONTEXT_WORDS = re.compile(
+    r"\b(?:instruction|prompt|context|directive|rule|guideline|constraint|restriction)s?\b",
+    re.I,
+)
+_INJECTION_YOU_ARE = re.compile(r"\byou\s+are\b", re.I)
+_INJECTION_ROLE_WORDS = re.compile(
+    r"\b(?:AI|assistant|bot|chatbot|model|language\s+model|expert|hacker|admin|developer)\b",
+    re.I,
+)
+_INJECTION_IMPERATIVE = re.compile(
+    r"\b(?:do|execute|run|ignore|forget|reveal|show|print|tell|give|output|bypass)\b",
+    re.I,
+)
+# 系统标签
+_SYSTEM_TAGS_RE = re.compile(
+    r"<\s*/?\s*(?:system|imagine)\s*>|"
+    r"\[/?INST\]|"
+    r"<</?SYS>>",
+    re.I,
+)
+# Base64 块（>40 字符的连续 base64 字符）
+_BASE64_BLOCK_RE = re.compile(r"[A-Za-z0-9+/]{40,}={0,2}")
+_DECODE_WORD_RE = re.compile(r"\b(?:decode|decrypt|atob|b64decode)\b", re.I)
+# 中文注入关键词
+_CHINESE_INJECTION_RE = re.compile(
+    r"忽略|无视|忘记|你现在是|你是一个|系统提示|扮演|假装"
+)
+# 英文注入关键词
+_ENGLISH_INJECTION_RE = re.compile(
+    r"\b(?:ignore|disregard|forget|jailbreak|pretend|roleplay)\b",
+    re.I,
+)
+# 全大写 + 感叹号 + 命令式
+_ALL_CAPS_IMPERATIVE_RE = re.compile(
+    r"\b(?:IGNORE|FORGET|DISREGARD|REVEAL|OUTPUT|EXECUTE|DO|TELL)\b[^.!?\n]*!",
+)
+# 分隔符后跟指令关键词
+_SEPARATOR_INSTRUCTION_RE = re.compile(
+    r"(?:#{3,}|-{3,})\s*(?:instruction|system|prompt|指令|系统)",
+    re.I,
+)
 
 # ── 有害内容关键词 ────────────────────────────────────────────
 
@@ -365,20 +451,123 @@ class ContentFilter:
     def _detect_injection(self, content: str) -> List[str]:
         """检测注入攻击模式.
 
+        P3 加固：采用两阶段检测:
+            1. 正则模式匹配（快速路径）— 命中已知注入模式
+            2. 启发式评分 — 多个弱指标组合时提高置信度
+
+        如果正则命中或启发式评分 >= 0.5，返回检测结果.
+        返回的 hits 中包含正则匹配和启发式因子.
+
         Args:
             content: 内容字符串.
 
         Returns:
-            匹配到的注入模式列表.
+            匹配到的注入模式/因子列表.
         """
         hits: List[str] = []
+
+        # 阶段 1：正则模式匹配（快速路径）
         for pattern in _INJECTION_PATTERNS:
             matches: List[str] = pattern.findall(content)
             if matches:
-                hits.extend(matches if isinstance(matches[0], str) else
-                           [m[0] if isinstance(m, tuple) else str(m) for m in matches])
+                for m in matches:
+                    if isinstance(m, tuple):
+                        hits.extend(s for s in m if s)
+                    elif isinstance(m, str):
+                        hits.append(m)
+
+        # 阶段 2：启发式评分
+        score, factors = self._score_injection_risk(content)
+        if score >= 0.5:
+            hits.extend(factors)
+
         # 去重
         return list(set(hits)) if hits else []
+
+    def _score_injection_risk(
+        self, content: str
+    ) -> tuple[float, List[str]]:
+        """启发式评估注入风险分数.
+
+        多个弱指标组合时提高置信度，避免单一弱指标造成误报.
+
+        评分因子:
+            - 命中已知注入模式: +0.4 每个（最高 0.8）
+            - "ignore/forget/disregard" + "instruction/prompt/context" 组合: +0.3
+            - "you are" + 角色名词 + 命令式动词: +0.2
+            - 系统标签（<system>, [INST], <<SYS>>）: +0.3
+            - Base64 块 + "decode": +0.3
+            - 多语言混合（中文注入词 + 英文注入词同时出现）: +0.2
+            - 全大写 + 感叹号 + 命令式: +0.1
+            - 分隔符 + 指令关键词: +0.2
+
+        Args:
+            content: 内容字符串.
+
+        Returns:
+            (score, factors): 风险分数（0.0-1.0）和触发的因子列表.
+        """
+        score: float = 0.0
+        factors: List[str] = []
+
+        # 因子 1：命中已知注入模式（+0.4 每个，最高 0.8）
+        pattern_hits: int = 0
+        for pattern in _INJECTION_PATTERNS:
+            if pattern.search(content):
+                pattern_hits += 1
+        if pattern_hits > 0:
+            bonus: float = min(0.4 * pattern_hits, 0.8)
+            score += bonus
+            factors.append(f"regex_patterns({pattern_hits})")
+
+        # 因子 2：ignore/forget/disregard + instruction/prompt/context 组合
+        has_ignore = bool(_INJECTION_IGNORE_WORDS.search(content))
+        has_context = bool(_INJECTION_CONTEXT_WORDS.search(content))
+        if has_ignore and has_context:
+            score += 0.3
+            factors.append("ignore_context_combo")
+
+        # 因子 3：you are + 角色名词 + 命令式动词
+        has_you_are = bool(_INJECTION_YOU_ARE.search(content))
+        has_role = bool(_INJECTION_ROLE_WORDS.search(content))
+        has_imperative = bool(_INJECTION_IMPERATIVE.search(content))
+        if has_you_are and has_role and has_imperative:
+            score += 0.2
+            factors.append("you_are_role_imperative")
+
+        # 因子 4：系统标签
+        if _SYSTEM_TAGS_RE.search(content):
+            score += 0.3
+            factors.append("system_tags")
+
+        # 因子 5：Base64 块 + decode
+        has_b64_block = bool(_BASE64_BLOCK_RE.search(content))
+        has_decode = bool(_DECODE_WORD_RE.search(content))
+        if has_b64_block and has_decode:
+            score += 0.3
+            factors.append("base64_decode_combo")
+
+        # 因子 6：多语言混合（中文注入词 + 英文注入词同时出现）
+        has_chinese = bool(_CHINESE_INJECTION_RE.search(content))
+        has_english = bool(_ENGLISH_INJECTION_RE.search(content))
+        if has_chinese and has_english:
+            score += 0.2
+            factors.append("multilingual_injection")
+
+        # 因子 7：全大写 + 感叹号 + 命令式
+        if _ALL_CAPS_IMPERATIVE_RE.search(content):
+            score += 0.1
+            factors.append("caps_imperative")
+
+        # 因子 8：分隔符 + 指令关键词
+        if _SEPARATOR_INSTRUCTION_RE.search(content):
+            score += 0.2
+            factors.append("separator_instruction")
+
+        # 限制分数上限
+        score = min(score, 1.0)
+
+        return score, factors
 
     def _detect_sensitive(self, content: str) -> List[str]:
         """检测敏感词.
