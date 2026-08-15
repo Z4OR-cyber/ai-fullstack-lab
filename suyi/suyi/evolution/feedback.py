@@ -31,6 +31,7 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .learner import LearningEngine
+    from .learned.weak_signals import WeakSignalCollector
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -197,10 +198,17 @@ class FeedbackCollector:
     IMPLICIT_MAX_RETRIES: int = 3
     IMPLICIT_MAX_DURATION: float = 60.0  # 秒
 
-    def __init__(self, storage_dir: Optional[str] = None):
+    def __init__(
+        self,
+        storage_dir: Optional[str] = None,
+        weak_signal_collector: "Optional[WeakSignalCollector]" = None,
+    ):
         """
         Args:
             storage_dir: 数据持久化目录.
+            weak_signal_collector: 可选的弱信号积累器（v1.6.0 旁路知识层）。
+                传入后，负面反馈（thumbs_down / comment / 未完成）会自动
+                记录为弱信号。为 None 时行为与旧版完全一致（向后兼容）.
         """
         if storage_dir is None:
             pkg_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -211,6 +219,8 @@ class FeedbackCollector:
 
         # interaction_id → Feedback
         self._feedbacks: Dict[str, Feedback] = {}
+        # 旁路知识层：弱信号积累器（可选，向后兼容）
+        self.weak_signal_collector = weak_signal_collector
         self._load()
 
     # ── 显式反馈收集 ──────────────────────────────────────
@@ -236,6 +246,9 @@ class FeedbackCollector:
         fb.explicit_comment = comment
         self._feedbacks[interaction_id] = fb
         self._save()
+
+        # 旁路知识层：负面显式反馈记录为弱信号
+        self._record_weak_signal_from_feedback(fb)
         return fb
 
     # ── 隐式反馈收集 ──────────────────────────────────────
@@ -267,6 +280,10 @@ class FeedbackCollector:
         fb.implicit_tool_failures = tool_failures
         self._feedbacks[interaction_id] = fb
         self._save()
+
+        # 旁路知识层：未完成或有重试时记录弱信号
+        if not completion or retries > 0:
+            self._record_weak_signal_from_feedback(fb)
         return fb
 
     def collect_from_interaction(self, record: Any) -> Feedback:
@@ -475,6 +492,61 @@ class FeedbackCollector:
         if interaction_id in self._feedbacks:
             return self._feedbacks[interaction_id]
         return Feedback(interaction_id=interaction_id)
+
+    def _record_weak_signal_from_feedback(self, fb: Feedback) -> None:
+        """将反馈转化为旁路弱信号（v1.6.0）.
+
+        规则：
+            - thumbs_down → ``thumbs_down`` 弱信号
+            - 显式 comment（任意评分）→ ``user_comment`` 弱信号
+            - 未完成（implicit_completion=False）或有重试 → ``retry`` 弱信号
+
+        未配置 weak_signal_collector 时为空操作，保持向后兼容。
+
+        Args:
+            fb: 反馈实例.
+        """
+        collector = self.weak_signal_collector
+        if collector is None:
+            return
+
+        # 任务摘要：用 comment 或 interaction_id 构造（不存完整 prompt）
+        summary = fb.explicit_comment or f"interaction {fb.interaction_id}"
+        category_hint = self._infer_weak_category(fb)
+
+        if fb.explicit_rating in ("thumbs_down", "down"):
+            collector.record(
+                signal_type="thumbs_down",
+                context_summary=summary,
+                category_hint=category_hint,
+            )
+        if fb.explicit_comment:
+            collector.record(
+                signal_type="user_comment",
+                context_summary=summary,
+                category_hint=category_hint,
+            )
+        if not fb.implicit_completion or fb.implicit_retries > 0:
+            # 仅在确实有隐式反馈信息（非默认零值）时记录 retry
+            if fb.has_implicit:
+                collector.record(
+                    signal_type="retry",
+                    context_summary=summary,
+                    category_hint=category_hint,
+                )
+
+    @staticmethod
+    def _infer_weak_category(fb: Feedback) -> str:
+        """从反馈推断弱信号类别提示（用于同类归并）."""
+        if fb.implicit_tool_failures > 0:
+            return f"tool_failure_{fb.implicit_tool_failures}"
+        if not fb.implicit_completion:
+            return "incomplete"
+        if fb.explicit_rating in ("thumbs_down", "down"):
+            return "negative_rating"
+        if fb.explicit_comment:
+            return "user_comment"
+        return "general"
 
     def _compute_explicit_signal(self, fb: Feedback) -> float:
         """计算显式反馈信号 [-1, 1].

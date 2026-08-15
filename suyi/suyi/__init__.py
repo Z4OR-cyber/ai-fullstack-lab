@@ -34,12 +34,17 @@ Quick start:
     result = await agent.run("Do something")
 """
 
-__version__ = "1.5.0"
+__version__ = "1.6.0"
 # v1.4.0: 安全加固 — CodeSandboxTool P0 加固（open 写模式拦截、反射函数拦截、
 #   dunder 属性访问拦截、危险模块扩展、子进程环境变量最小化）、参数安全验证器.
 # v1.5.0: ComputerUseTool — OS 级桌面控制层（截图/鼠标/键盘/窗口/应用启动），
 #   可选依赖优雅降级、dry_run 模式、安全护栏（危险组合键/危险程序拦截、
 #   坐标越界保护）、审计日志、HITL 签名按动作类型授权.
+# v1.6.0: 旁路知识层（Bypass Knowledge Layer）— 代码与数据分离、稳定与进化
+#   分离。LearnedKnowledgeStore + TF-IDF 检索（兼容 MemoryBackend 协议，
+#   可直接插入 ContextAssembler）+ 语义去重（skip/merge/append）+ 正样本
+#   蒸馏器 + 弱信号积累器（达阈值触发外循环蒸馏）+ 三级知识注入（原则/案例/
+#   专项）。FeedbackCollector 与 EvolutionOrchestrator 增量对接，向后兼容.
 
 # Memory
 from .memory import (

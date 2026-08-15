@@ -127,11 +127,23 @@ class EvolutionOrchestrator:
         self,
         storage_dir: Optional[str] = None,
         skills_dir: Optional[str] = None,
+        learned_store: Optional[Any] = None,
+        distiller: Optional[Any] = None,
+        weak_signal_collector: Optional[Any] = None,
     ):
         """
         Args:
             storage_dir: 数据持久化目录.
             skills_dir: 技能库目录.
+            learned_store: 可选的旁路知识存储
+                (:class:`~suyi.evolution.learned.LearnedKnowledgeStore`)。
+                为 None 时不启用旁路知识层（向后兼容）.
+            distiller: 可选的正样本蒸馏器
+                (:class:`~suyi.evolution.learned.SuccessDistiller`)。
+                若提供了 learned_store 但未提供 distiller，会自动创建.
+            weak_signal_collector: 可选的弱信号积累器
+                (:class:`~suyi.evolution.learned.WeakSignalCollector`)。
+                提供后，反馈收集器会自动对接记录弱信号.
         """
         if storage_dir is None:
             pkg_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -146,7 +158,22 @@ class EvolutionOrchestrator:
             storage_dir=storage_dir,
         )
         self.evaluator = BehaviorEvaluator(storage_dir=storage_dir)
-        self.feedback_collector = FeedbackCollector(storage_dir=storage_dir)
+
+        # ── 旁路知识层（v1.6.0，可选，向后兼容）──────────────
+        self.learned_store = learned_store
+        self.weak_signal_collector = weak_signal_collector
+        # 反馈收集器对接弱信号积累器（若提供）
+        self.feedback_collector = FeedbackCollector(
+            storage_dir=storage_dir,
+            weak_signal_collector=weak_signal_collector,
+        )
+
+        # 若提供了 store 但未提供 distiller，则懒加载创建
+        self.distiller = distiller
+        if self.distiller is None and self.learned_store is not None:
+            from .learned import SemanticDeduplicator, SuccessDistiller
+            dedup = SemanticDeduplicator(self.learned_store)
+            self.distiller = SuccessDistiller(self.learned_store, dedup)
 
         self._cycle_count: int = 0
 
@@ -263,6 +290,68 @@ class EvolutionOrchestrator:
         result.duration = time.time() - start_time
         return result
 
+    # ── 旁路知识进化（v1.6.0）────────────────────────────
+
+    def run_bypass_evolution(
+        self,
+        records: Optional[List[InteractionRecord]] = None,
+    ) -> Dict[str, Any]:
+        """执行旁路知识进化循环（附加于主进化循环，不改变其行为）.
+
+        流程：
+            1. 正样本蒸馏：对交互记录运行 SuccessDistiller，将成功模式/
+               失败教训经去重后写入旁路知识 store.
+            2. 弱信号检查：收集累计达到阈值的弱信号，计入待蒸馏列表
+               （实际蒸馏可由上层调度触发）.
+
+        该方法不调用 LLM、不修改主策略代码，完全是"数据侧"的进化，
+        体现"代码稳定、数据进化"的旁路思想。
+
+        Args:
+            records: 待蒸馏的交互记录。为 None 时从 learner 中取全部记录.
+
+        Returns:
+            统计字典，包含：
+                - ``bypass_enabled``: 是否启用了旁路知识层
+                - ``distillation``: 蒸馏统计（new/skipped/merged/appended）
+                - ``pending_weak_signals``: 达阈值待蒸馏的弱信号数
+                - ``total_knowledge_entries``: 当前旁路知识条目总数
+        """
+        result: Dict[str, Any] = {
+            "bypass_enabled": self.learned_store is not None,
+            "distillation": {
+                "new_entries": 0,
+                "skipped": 0,
+                "merged": 0,
+                "appended": 0,
+            },
+            "pending_weak_signals": 0,
+            "total_knowledge_entries": 0,
+        }
+
+        if self.learned_store is None or self.distiller is None:
+            return result
+
+        if records is None:
+            records = self.learner.get_interactions()
+
+        # 1. 正样本/失败教训蒸馏
+        distill_result = self.distiller.distill_batch(records)
+        result["distillation"] = {
+            "new_entries": len(distill_result.new_entries),
+            "skipped": distill_result.skipped,
+            "merged": distill_result.merged,
+            "appended": distill_result.appended,
+        }
+
+        # 2. 弱信号检查
+        if self.weak_signal_collector is not None:
+            pending = self.weak_signal_collector.get_pending_distillation()
+            result["pending_weak_signals"] = len(pending)
+
+        result["total_knowledge_entries"] = self.learned_store.count()
+        return result
+
     # ── 版本对比 ──────────────────────────────────────────
 
     def compare_versions(
@@ -305,4 +394,14 @@ class EvolutionOrchestrator:
             "generated_skills": len(self.generator.get_generated_skills()),
             "active_skills": len(self.generator.get_active_skills()),
             "feedback_stats": self.feedback_collector.get_stats(),
+            # v1.6.0 旁路知识层
+            "bypass_knowledge_enabled": self.learned_store is not None,
+            "learned_knowledge_entries": (
+                self.learned_store.count() if self.learned_store is not None else 0
+            ),
+            "weak_signals": (
+                self.weak_signal_collector.count()
+                if self.weak_signal_collector is not None
+                else 0
+            ),
         }

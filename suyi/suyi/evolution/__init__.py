@@ -71,6 +71,9 @@ from .feedback import (
 )
 from .orchestrator import EvolutionOrchestrator
 
+# v1.6.0: 旁路知识层（Bypass Knowledge Layer）
+from . import learned  # noqa: F401  (子模块可通过 suyi.evolution.learned 访问)
+
 __all__ = [
     # Learner
     "InteractionRecord",
@@ -91,4 +94,33 @@ __all__ = [
     "FeedbackCollector",
     # Orchestrator
     "EvolutionOrchestrator",
+    # v1.6.0 旁路知识层（顶层便捷导出）
+    "KnowledgeEntry",
+    "LearnedKnowledgeStore",
+    "KnowledgeRetriever",
+    "SemanticDeduplicator",
+    "DeduplicationResult",
+    "DedupDecision",
+    "SuccessDistiller",
+    "DistillationResult",
+    "WeakSignal",
+    "WeakSignalCollector",
+    "ThreeTierKnowledgeInjector",
+    "KnowledgeTier",
 ]
+
+# v1.6.0 旁路知识层顶层便捷导出（不破坏既有导入路径）
+from .learned import (  # noqa: E402
+    KnowledgeEntry,
+    LearnedKnowledgeStore,
+    KnowledgeRetriever,
+    SemanticDeduplicator,
+    DeduplicationResult,
+    DedupDecision,
+    SuccessDistiller,
+    DistillationResult,
+    WeakSignal,
+    WeakSignalCollector,
+    ThreeTierKnowledgeInjector,
+    KnowledgeTier,
+)
