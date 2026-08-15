@@ -168,3 +168,20 @@ SQL注入、命令注入、XSS、路径遍历、硬编码密钥、不安全反�
 
 ## 许可
 MIT
+
+## 实战案例
+
+### Varonis Bug Bounty Recon 经验
+
+**侦察数据**：
+- 518候选子域名 → 26存活 → 24 HTTP服务
+- 114个自动化扫描findings
+
+**误报识别**：
+- 所有CRITICAL级别findings均为误报，根因是SPA catch-all（单页应用对所有路径返回相同HTML）
+- 使用404控制路径对比法验证后，仅保留6个P4/P5安全头问题
+
+**工具与经验**：
+- certspotter替代crt.sh进行证书透明日志查询（更稳定，crt.sh频繁超时）
+- 云端数据中心IP被Imperva WAF直接拦截，深度测试需要住宅IP
+- atlas-gw.varonis.io发现Alltrue LLM网关默认后端httpbin.org，所有路径返回400 `{"message": "Unprocessable request to https://httpbin.org/"}`，响应头含`x-alltrue-llm-error-type: rule-violation`，判定为配置信息泄露但不可直接利用（SSRF注入全部被Azure WAF拦截403）
