@@ -1,7 +1,5 @@
 
 
-抓取网页文章内容，突破 robots.txt 限制，提取干净的文章正文。
-
 ## 核心能力
 
 - **两级抓取策略**：先用 fetch_web 尝试直接抓取；若被 robots.txt 拦截，自动切换到 agent-browser 浏览器抓取
