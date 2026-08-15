@@ -1,9 +1,4 @@
----
-name: article-reader
-description: 抓取网页文章内容，特别是被robots.txt拦截的微信公众号文章、知乎专栏等。当用户分享微信文章链接、需要读取公众号内容、抓取被robots.txt阻止的网页、提取文章正文、读取mp.weixin.qq.com链接时使用此技能。支持微信公众号、知乎、今日头条等常见中文内容平台的文章抓取。
----
 
-# 文章抓取器
 
 抓取网页文章内容，突破 robots.txt 限制，提取干净的文章正文。
 
@@ -103,3 +98,18 @@ sessions_spawn(
 - 如果 agent-browser 也无法打开（如需要登录），如实告知用户卡点
 - 不要把 URL 当作搜索关键词去搜索引擎检索，这不会得到文章内容
 - 抓取到的内容仅供用户阅读和分析使用，不用于绕过版权保护
+
+
+---
+
+## ⚠️ Deprecation Notice
+
+**本技能已被功能更完整的版本替代。**
+
+请使用以下技能之一：
+- **Coze技能商店**：`web-article-fetcher`（skill_id: 7674228102490226715）— 4级降级（fetch_web → curl伪装UA → Python解析 → agent-browser），含微信双模式解析和验证码检测
+- **群项目内**：如存在 `unified-article-reader`，优先使用该版本
+
+本技能仅保留2层降级（fetch_web → agent-browser），作为轻量备选。新任务请使用上述完整版本。
+
+*Deprecated by 投资理财小豆, 2026-08-15*
