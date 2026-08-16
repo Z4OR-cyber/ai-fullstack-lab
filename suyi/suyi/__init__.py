@@ -34,7 +34,7 @@ Quick start:
     result = await agent.run("Do something")
 """
 
-__version__ = "1.7.0"
+__version__ = "1.8.0"
 # v1.4.0: 安全加固 — CodeSandboxTool P0 加固（open 写模式拦截、反射函数拦截、
 #   dunder 属性访问拦截、危险模块扩展、子进程环境变量最小化）、参数安全验证器.
 # v1.5.0: ComputerUseTool — OS 级桌面控制层（截图/鼠标/键盘/窗口/应用启动），
@@ -50,6 +50,12 @@ __version__ = "1.7.0"
 #   fail-open 不阻断生产）；③执行调度（read_only=True 只读工具并行、
 #   read_only=False 写工具在 asyncio.Lock 内串行、结果按 tool_calls 原始
 #   顺序有序提交）。纯增量、向后兼容，默认关闭新行为.
+# v1.8.0: 多平台漏洞赏金报告统一提交适配器（BountySubmissionAdapter）—
+#   suyi.integrations.bounty 子包，支持 HackerOne / Bugcrowd / Intigriti /
+#   YesWeHack 四大平台。统一 BountyReport 数据模型 + 平台适配器模式 +
+#   BountyRouter 多平台路由 + DraftStore 草稿持久化审查。安全设计：
+#   confirmed=False 默认只返回草稿、dry_run 只构建 payload 不发请求、
+#   Token 仅通过参数或环境变量传入。纯增量、向后兼容，零新外部依赖.
 
 # Memory
 from .memory import (
