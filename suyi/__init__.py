@@ -76,7 +76,9 @@ __version__ = "1.10.1"
 # v1.10.1: OpenAIAdapter 兼容 Ollama 本地模型 — 新增 _parse_content_tool_calls
 #   兜底解析：当 tool_calls 数组缺失但 content 包含 {"name":...,"arguments":...}
 #   JSON（Ollama qwen2.5-coder 等本地模型行为）时自动解析为 ToolCall；
-#   解析成功后清空 content 避免 JSON 被当作最终回答。7 个专项测试。
+#   解析成功后清空 content 避免 JSON 被当作最终回答。修复 _build_request_body
+#   中 assistant tool_calls 的 arguments 序列化为 JSON 字符串（Ollama 要求）。
+#   E2E 3 场景全通过（qwen2.5-coder:7b @ Ollama）。7 个专项测试。
 
 # Memory
 from .memory import (

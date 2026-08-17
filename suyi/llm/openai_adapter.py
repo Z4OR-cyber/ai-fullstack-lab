@@ -131,10 +131,21 @@ class OpenAIAdapter:
                 api_messages.append(api_msg)
             elif msg.get("role") == "assistant" and "tool_calls" in msg:
                 # Assistant message with tool calls — ensure correct format
+                # Ollama/OpenAI require function.arguments to be a JSON *string*,
+                # but Suyi's ToolCall.to_dict() emits a dict.  Serialize here.
+                normalized_tcs = []
+                for tc in msg["tool_calls"]:
+                    tc_copy = dict(tc)
+                    func = dict(tc_copy.get("function", {}))
+                    raw_args = func.get("arguments", "{}")
+                    if not isinstance(raw_args, str):
+                        func["arguments"] = json.dumps(raw_args, ensure_ascii=False)
+                    tc_copy["function"] = func
+                    normalized_tcs.append(tc_copy)
                 api_messages.append({
                     "role": "assistant",
                     "content": msg.get("content") or "",
-                    "tool_calls": msg["tool_calls"],
+                    "tool_calls": normalized_tcs,
                 })
             else:
                 api_messages.append(api_msg)
