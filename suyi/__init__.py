@@ -34,7 +34,8 @@ Quick start:
     result = await agent.run("Do something")
 """
 
-__version__ = "1.10.0"
+__version__ = "1.10.1"
+
 # v1.4.0: 安全加固 — CodeSandboxTool P0 加固（open 写模式拦截、反射函数拦截、
 #   dunder 属性访问拦截、危险模块扩展、子进程环境变量最小化）、参数安全验证器.
 # v1.5.0: ComputerUseTool — OS 级桌面控制层（截图/鼠标/键盘/窗口/应用启动），
@@ -72,6 +73,10 @@ __version__ = "1.10.0"
 #   AMLEvaluator：7 维（事实召回/多跳/时序/治理/个性化/规则/安全）本地
 #   自测套件，每维 5+ 用例，输出 JSON 报告。AMLMemoryServer.stop() 修复
 #   daemon 线程内自 join 的 RuntimeError。纯增量、向后兼容，零新依赖。
+# v1.10.1: OpenAIAdapter 兼容 Ollama 本地模型 — 新增 _parse_content_tool_calls
+#   兜底解析：当 tool_calls 数组缺失但 content 包含 {"name":...,"arguments":...}
+#   JSON（Ollama qwen2.5-coder 等本地模型行为）时自动解析为 ToolCall；
+#   解析成功后清空 content 避免 JSON 被当作最终回答。7 个专项测试。
 
 # Memory
 from .memory import (
