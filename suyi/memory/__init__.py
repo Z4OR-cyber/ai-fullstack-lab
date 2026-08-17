@@ -75,6 +75,22 @@ from .hybrid_retriever import (
 from .aml_memory import AMLMemoryStore, MemoryRecord
 from .aml_adapter import AMLMemoryServer, AMLRequestHandler
 
+# v1.10.0: MemRL utility 重排 + AML 7 维自测
+from .utility_reranker import (
+    UtilityReranker,
+    RerankCandidate,
+    RerankResult,
+    FEATURE_NAMES as UTILITY_FEATURE_NAMES,
+    N_FEATURES as UTILITY_N_FEATURES,
+    extract_features as extract_utility_features,
+)
+from .aml_evaluator import (
+    AMLEvaluator,
+    EvalReport,
+    DimensionResult,
+    CaseResult,
+)
+
 
 class MemoryPriority(IntEnum):
     """记忆层优先级枚举（数字越大优先级越高）。
@@ -576,4 +592,15 @@ __all__ = [
     'MemoryRecord',
     'AMLMemoryServer',
     'AMLRequestHandler',
+    # v1.10.0: MemRL utility 重排 + AML 7 维自测
+    'UtilityReranker',
+    'RerankCandidate',
+    'RerankResult',
+    'UTILITY_FEATURE_NAMES',
+    'UTILITY_N_FEATURES',
+    'extract_utility_features',
+    'AMLEvaluator',
+    'EvalReport',
+    'DimensionResult',
+    'CaseResult',
 ]

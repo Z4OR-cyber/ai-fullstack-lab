@@ -34,7 +34,7 @@ Quick start:
     result = await agent.run("Do something")
 """
 
-__version__ = "1.9.0"
+__version__ = "1.10.0"
 # v1.4.0: 安全加固 — CodeSandboxTool P0 加固（open 写模式拦截、反射函数拦截、
 #   dunder 属性访问拦截、危险模块扩展、子进程环境变量最小化）、参数安全验证器.
 # v1.5.0: ComputerUseTool — OS 级桌面控制层（截图/鼠标/键盘/窗口/应用启动），
@@ -62,6 +62,16 @@ __version__ = "1.9.0"
 #   JSON 持久化）+ AMLMemoryServer（标准库 http.server 实现 POST /add
 #   与 POST /search，支持 X-API-Key 鉴权、asyncio 集成、优雅关闭）。
 #   纯 Python + numpy，不引入新外部依赖，不调用外部 LLM。
+# v1.10.0: AML P1 改造 — MemRL utility 重排 + AML 7 维自测套件。
+#   新增 suyi.memory.utility_reranker.UtilityReranker：10 维特征
+#   （BM25/Dense/RRF 分数、时间衰减、三层 one-hot、访问频次、内容长度、
+#   查询词重叠率）+ 线性 utility 模型 + 在线 SGD 更新（L2 正则）+
+#   JSON 权重持久化 + 训练日志记录。AMLMemoryStore.search 在 RRF 召回后
+#   可选地进行第二阶段重排（环境变量 AML_RERANK_ENABLED 控制，默认开启，
+#   不改变 /search 请求/响应格式）。新增 suyi.memory.aml_evaluator.
+#   AMLEvaluator：7 维（事实召回/多跳/时序/治理/个性化/规则/安全）本地
+#   自测套件，每维 5+ 用例，输出 JSON 报告。AMLMemoryServer.stop() 修复
+#   daemon 线程内自 join 的 RuntimeError。纯增量、向后兼容，零新依赖。
 
 # Memory
 from .memory import (
@@ -96,6 +106,14 @@ from .memory import (
     MemoryRecord as AMLMemoryRecord,
     AMLMemoryServer,
     AMLRequestHandler,
+    # v1.10.0: MemRL utility 重排 + AML 7 维自测
+    UtilityReranker,
+    RerankCandidate,
+    RerankResult,
+    AMLEvaluator,
+    EvalReport,
+    DimensionResult as AMLDimensionResult,
+    CaseResult as AMLCaseResult,
 )
 
 # Core
@@ -188,6 +206,14 @@ __all__ = [
     "AMLMemoryRecord",
     "AMLMemoryServer",
     "AMLRequestHandler",
+    # v1.10.0: MemRL utility 重排 + AML 7 维自测
+    "UtilityReranker",
+    "RerankCandidate",
+    "RerankResult",
+    "AMLEvaluator",
+    "EvalReport",
+    "AMLDimensionResult",
+    "AMLCaseResult",
     # Core
     "AgentLoop",
     "ContextAssembler",

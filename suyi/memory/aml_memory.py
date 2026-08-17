@@ -29,6 +29,9 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from .hybrid_retriever import AMLHybridRetriever as HybridRetriever, RetrievalResult
 
+# v1.10.0: MemRL utility 重排器（可选，延迟导入以避免循环依赖）
+from .utility_reranker import UtilityReranker, RerankCandidate
+
 
 # ----------------------------------------------------------------------
 #  常量
@@ -107,6 +110,9 @@ class MemoryRecord:
     ttl: float = 0.0
     metadata: Dict[str, Any] = field(default_factory=dict)
     score: float = 0.0
+    # v1.10.0: MemRL utility 重排器使用的访问计数，每次 search 命中 +1
+    access_count: int = 0
+    last_accessed_at: float = 0.0
 
     @property
     def is_expired(self) -> bool:
@@ -139,6 +145,8 @@ class MemoryRecord:
             ttl=data.get("ttl", 0.0),
             metadata=data.get("metadata", {}),
             score=0.0,
+            access_count=int(data.get("access_count", 0)),
+            last_accessed_at=float(data.get("last_accessed_at", 0.0)),
         )
 
 
@@ -248,6 +256,7 @@ class AMLMemoryStore:
         dense_weight: float = 1.0,
         rrf_k: int = 60,
         time_decay_half_life: float = 7 * 24 * 3600,  # 7 天
+        reranker: Any = None,
     ) -> None:
         """初始化 AML 记忆存储。
 
@@ -264,6 +273,14 @@ class AMLMemoryStore:
             dense_weight: Dense 路在 RRF 融合中的权重。
             rrf_k: RRF 常数。
             time_decay_half_life: 检索时间衰减半衰期（秒）。
+            reranker: v1.10.0 新增，可选的 utility 重排器配置：
+
+                - ``None``（默认）：按环境变量 ``AML_RERANK_ENABLED``
+                  自动决定（默认开启，仅当值为 ``false/0/no/off`` 时
+                  关闭）；
+                - ``False``：显式关闭重排；
+                - :class:`~suyi.memory.utility_reranker.UtilityReranker`
+                  实例：直接复用外部实例（便于共享权重）。
         """
         if storage_dir is None:
             storage_dir = os.path.join(
@@ -303,11 +320,56 @@ class AMLMemoryStore:
             time_decay_half_life=time_decay_half_life,
         )
 
+        # v1.10.0: MemRL utility 重排器（可选，默认开启）
+        # 通过环境变量 AML_RERANK_ENABLED=false 可关闭；显式传入
+        # reranker=False 也可关闭；显式传入 UtilityReranker 实例则复用。
+        self._reranker: Optional[UtilityReranker] = self._init_reranker(
+            reranker=reranker,
+        )
+
         # 线程锁（HTTP 服务器可能多线程访问）
         self._lock = threading.RLock()
 
         # 加载持久化数据
         self._load()
+
+    @staticmethod
+    def _init_reranker(
+        reranker: Any,
+    ) -> Optional[UtilityReranker]:
+        """根据构造参数初始化 utility 重排器。
+
+        Args:
+            reranker: 支持三种取值：
+
+                - ``None``（默认）：根据环境变量
+                  ``AML_RERANK_ENABLED`` 决定是否创建（默认开启，
+                  仅当值为 ``"false"`` / ``"0"`` / ``"no"`` 时关闭）。
+                - ``False``：显式关闭。
+                - :class:`UtilityReranker` 实例：直接复用。
+
+        Returns:
+            ``UtilityReranker`` 实例或 ``None``。
+        """
+        if reranker is False:
+            return None
+        if isinstance(reranker, UtilityReranker):
+            return reranker
+        if reranker is None:
+            flag = os.environ.get("AML_RERANK_ENABLED", "true").strip().lower()
+            if flag in ("false", "0", "no", "off"):
+                return None
+        # v1.10.0：默认重排器使用与检索器一致的 7 天半衰期。
+        # 权重文件路径独立于 storage_dir，避免多 store 实例互相覆盖。
+        return UtilityReranker(
+            time_decay_half_life=7 * 24 * 3600.0,
+            auto_load=True,
+        )
+
+    @property
+    def reranker(self) -> Optional[UtilityReranker]:
+        """当前使用的 utility 重排器（可能为 None）。"""
+        return self._reranker
 
     # ------------------------------------------------------------------
     #  添加消息
@@ -727,14 +789,18 @@ class AMLMemoryStore:
             # 去重候选
             candidate_doc_ids = list(set(candidate_doc_ids))
 
-            # 混合检索（取更多候选以便后续过滤）
+            # v1.10.0：RRF 第一阶段召回 top_k*3 候选。
+            # 若配置了 UtilityReranker，则对这些候选做第二阶段重排，
+            # 最终取 top_k。整个过程不改变返回结构（仍返回
+            # content/score/metadata 等字段），仅在 metadata 中附加
+            # 可选的 utility 分。
             fetch_k = min(top_k * 3, len(candidate_doc_ids))
             raw_results = self._retriever.search(
                 query, top_k=fetch_k, candidate_ids=candidate_doc_ids,
             )
 
-            # 后处理
-            results: List[Dict[str, Any]] = []
+            # 后处理：过滤过期 / 元数据条件，并构建结果列表
+            pre_results: List[Dict[str, Any]] = []
             for r in raw_results:
                 record_id = self._doc_to_record.get(r.doc_id)
                 if record_id is None:
@@ -754,20 +820,153 @@ class AMLMemoryStore:
                     ):
                         continue
 
-                results.append({
+                pre_results.append({
+                    "doc_id": r.doc_id,
+                    "record_id": record_id,
                     "content": record.content,
-                    "score": round(r.score, 6),
-                    "metadata": {
-                        **record.metadata,
-                        "layer": record.layer,
-                        "role": record.role,
-                        "session_id": record.session_id,
-                        "timestamp": record.timestamp,
-                        "record_id": record.id,
-                    },
+                    "score": float(r.score),
+                    "layer": record.layer,
+                    "role": record.role,
+                    "session_id": record.session_id,
+                    "timestamp": record.timestamp,
+                    "record": record,
                 })
 
+            if not pre_results:
+                return []
+
+            if self._reranker is not None and len(pre_results) > 1:
+                results = self._rerank_candidates(
+                    query=query,
+                    pre_results=pre_results,
+                    top_k=top_k,
+                    candidate_doc_ids=candidate_doc_ids,
+                )
+            else:
+                # 无重排器或候选数 <=1：直接按原 RRF 分数排序
+                pre_results.sort(key=lambda x: x["score"], reverse=True)
+                results = self._format_results(pre_results[:top_k])
+
             return results[:top_k]
+
+    def _build_rerank_candidate(
+        self,
+        doc_id: int,
+        route_scores: Dict[str, float],
+        record: MemoryRecord,
+    ) -> RerankCandidate:
+        """根据 doc_id 和单路得分构建一个 :class:`RerankCandidate`。"""
+        return RerankCandidate(
+            doc_id=doc_id,
+            content=record.content,
+            bm25_score=float(route_scores.get("bm25", 0.0)),
+            dense_score=float(route_scores.get("dense", 0.0)),
+            rrf_score=float(route_scores.get("fused", 0.0)),
+            layer=record.layer,
+            timestamp=record.timestamp,
+            access_count=int(getattr(record, "access_count", 0)),
+            metadata={
+                "record_id": record.id,
+                "role": record.role,
+                "session_id": record.session_id,
+                **record.metadata,
+            },
+        )
+
+    def _rerank_candidates(
+        self,
+        query: str,
+        pre_results: List[Dict[str, Any]],
+        top_k: int,
+        candidate_doc_ids: List[int],
+    ) -> List[Dict[str, Any]]:
+        """使用 UtilityReranker 对候选做第二阶段重排（内部方法）。
+
+        调用方必须持有 ``self._lock``。
+        """
+        assert self._reranker is not None
+
+        # 为所有召回候选取一次单路分数（特征需要）
+        route_map = self._retriever.score_candidates(
+            query, [p["doc_id"] for p in pre_results]
+        )
+
+        candidates: List[RerankCandidate] = []
+        for p in pre_results:
+            doc_id = p["doc_id"]
+            record: MemoryRecord = p["record"]
+            cands = self._build_rerank_candidate(
+                doc_id, route_map.get(doc_id, {}), record
+            )
+            candidates.append(cands)
+
+        ranked = self._reranker.rerank(
+            query, candidates, top_k=len(candidates)
+        )
+
+        now_ts = time.time()
+        ordered: List[Dict[str, Any]] = []
+        for rr in ranked[:top_k]:
+            c = rr.candidate
+            rec_id = c.metadata.get("record_id")
+            record = self._records.get(rec_id) if rec_id else None
+            if record is None:
+                continue
+            # 更新访问计数（utility 特征的反馈信号之一）
+            record.access_count = int(getattr(record, "access_count", 0)) + 1
+            record.last_accessed_at = now_ts
+
+            # 找到原始 RRF 分数（用于返回字段 score，保持与 v1.9 兼容）
+            original_score = 0.0
+            for p in pre_results:
+                if p["doc_id"] == c.doc_id:
+                    original_score = p["score"]
+                    break
+
+            ordered.append({
+                "doc_id": c.doc_id,
+                "record_id": rec_id,
+                "content": c.content,
+                "score": original_score,
+                "utility_score": rr.utility,
+                "layer": c.layer,
+                "role": c.metadata.get("role", record.role),
+                "session_id": c.metadata.get(
+                    "session_id", record.session_id
+                ),
+                "timestamp": c.timestamp,
+                "record": record,
+            })
+
+        return self._format_results(ordered)
+
+    @staticmethod
+    def _format_results(
+        items: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """把内部 dict 列表格式化为 search 返回的公开结构。"""
+        out: List[Dict[str, Any]] = []
+        for item in items:
+            record: MemoryRecord = item["record"]
+            metadata = {
+                **record.metadata,
+                "layer": item.get("layer", record.layer),
+                "role": item.get("role", record.role),
+                "session_id": item.get(
+                    "session_id", record.session_id
+                ),
+                "timestamp": item.get("timestamp", record.timestamp),
+                "record_id": item.get("record_id", record.id),
+            }
+            utility = item.get("utility_score")
+            if utility is not None:
+                metadata["utility_score"] = round(float(utility), 6)
+            out.append({
+                "content": item["content"],
+                "score": round(float(item["score"]), 6),
+                "metadata": metadata,
+            })
+        return out
 
     @staticmethod
     def _match_metadata(

@@ -886,6 +886,79 @@ class AMLHybridRetriever:
         return results
 
     # ------------------------------------------------------------------
+    #  候选评分（v1.10.0：供 UtilityReranker 使用）
+    # ------------------------------------------------------------------
+
+    def score_candidates(
+        self,
+        query: str,
+        doc_ids: Sequence[int],
+    ) -> Dict[int, Dict[str, float]]:
+        """获取指定候选文档在 BM25、Dense、RRF 三路上的得分。
+
+        本方法是 v1.10.0 新增的**只读**接口，用于给
+        :class:`~suyi.memory.utility_reranker.UtilityReranker` 的特征
+        抽取提供原始分数，不改变任何已有检索逻辑。
+
+        Args:
+            query: 查询文本。
+            doc_ids: 候选文档 ID 列表（通常来自 store 的候选集合）。
+
+        Returns:
+            ``{doc_id: {"bm25": float, "dense": float, "rrf": float,
+            "fused": float}}`` 字典。其中：
+
+            - ``bm25`` / ``dense`` 为单路原始得分（未命中为 0）；
+            - ``rrf`` 为该文档在两路 RRF 中的融合分（不含时间衰减）；
+            - ``fused`` 为乘以时间衰减因子后的最终融合分。
+        """
+        result: Dict[int, Dict[str, float]] = {}
+        if self._n_docs == 0 or not doc_ids:
+            return result
+
+        # 只在候选集合内计算单路得分，避免全量扫描
+        candidate_set = {
+            int(d) for d in doc_ids if 0 <= int(d) < self._n_docs
+        }
+        if not candidate_set:
+            return result
+
+        # 取候选数上限的结果（通常候选数已经是 fetch_k 量级）
+        fetch_k = min(max(len(candidate_set), 1), self._n_docs)
+        bm25_results = self.bm25.search(query, top_k=fetch_k,
+                                        candidate_ids=list(candidate_set))
+        dense_results = self.dense.search(query, top_k=fetch_k,
+                                          candidate_ids=list(candidate_set))
+
+        bm25_scores = self._rrf_scores(
+            [r.doc_id for r in bm25_results], self.rrf_k, self.bm25_weight
+        )
+        dense_scores = self._rrf_scores(
+            [r.doc_id for r in dense_results], self.rrf_k, self.dense_weight
+        )
+
+        bm25_raw = {r.doc_id: r.score for r in bm25_results}
+        dense_raw = {r.doc_id: r.score for r in dense_results}
+
+        for doc_id in candidate_set:
+            bm25 = float(bm25_raw.get(doc_id, 0.0))
+            dense = float(dense_raw.get(doc_id, 0.0))
+            rrf = bm25_scores.get(doc_id, 0.0) + dense_scores.get(
+                doc_id, 0.0
+            )
+            meta = self._doc_metadata[doc_id] if doc_id < len(
+                self._doc_metadata
+            ) else {}
+            fused = rrf * self._time_decay_factor(meta)
+            result[doc_id] = {
+                "bm25": bm25,
+                "dense": dense,
+                "rrf": rrf,
+                "fused": fused,
+            }
+        return result
+
+    # ------------------------------------------------------------------
     #  属性
     # ------------------------------------------------------------------
 

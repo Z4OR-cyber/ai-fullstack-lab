@@ -538,8 +538,9 @@ class AMLMemoryServer:
         store: Optional[AMLMemoryStore] = None,
         storage_dir: Optional[str] = None,
         api_key: Optional[str] = None,
-        version: str = "1.9.0",
+        version: str = "1.10.0",
         max_workers: int = 32,
+        reranker: Any = None,
         **store_kwargs: Any,
     ) -> None:
         """初始化 AML HTTP 服务器。
@@ -554,6 +555,12 @@ class AMLMemoryServer:
                 ``AML_API_KEY`` 读取；若环境变量也未设置，则不鉴权。
             version: 服务版本号，在 /health 中返回。
             max_workers: 最大并发工作线程数。
+            reranker: v1.10.0 新增，传递给 :class:`AMLMemoryStore` 的
+                utility 重排器配置；仅在 ``store`` 为 None 时生效。
+                支持 ``None``（按环境变量 ``AML_RERANK_ENABLED`` 决定，
+                默认开启）、``False``（关闭）或已有的
+                :class:`~suyi.memory.utility_reranker.UtilityReranker`
+                实例。
             **store_kwargs: 传递给 :class:`AMLMemoryStore` 的额外参数。
         """
         self.host = host
@@ -571,7 +578,9 @@ class AMLMemoryServer:
             self.store = store
         else:
             self.store = AMLMemoryStore(
-                storage_dir=storage_dir, **store_kwargs
+                storage_dir=storage_dir,
+                reranker=reranker,
+                **store_kwargs,
             )
 
         # HTTP 服务器实例
@@ -727,11 +736,16 @@ class AMLMemoryServer:
             self._event_loop = None
 
         if self._loop_thread is not None:
-            self._loop_thread.join(timeout=timeout)
+            # v1.10.0: 若 stop() 恰好从 loop 线程内调用（例如 daemon
+            # 线程的 finally 路径），join 当前线程会抛 RuntimeError，
+            # 此时跳过 join 即可。
+            if self._loop_thread is not threading.current_thread():
+                self._loop_thread.join(timeout=timeout)
             self._loop_thread = None
 
         if self._server_thread is not None:
-            self._server_thread.join(timeout=timeout)
+            if self._server_thread is not threading.current_thread():
+                self._server_thread.join(timeout=timeout)
             self._server_thread = None
 
         logger.info("AML Memory Server stopped")
