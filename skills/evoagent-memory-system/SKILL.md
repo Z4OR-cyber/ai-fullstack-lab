@@ -1,3 +1,13 @@
+---
+name: evoagent-memory-system
+description: "[DEPRECATED] Use suyi-agent-framework instead. Memory system embedded in Suyi framework."
+deprecated: true
+replaced_by: suyi-agent-framework
+deprecated_date: 2026-08-22
+---
+
+> WARNING: This skill is deprecated as of 2026-08-22. Use `suyi-agent-framework` instead. Memory system embedded in Suyi framework.
+
 # EvoAgent 三层记忆系统
 
 ## 概述
