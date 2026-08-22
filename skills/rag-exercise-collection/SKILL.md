@@ -1,3 +1,13 @@
+---
+name: rag-exercise-collection
+description: "[DEPRECATED] Use ai-learning-suite instead. RAG exercises integrated into learning suite."
+deprecated: true
+replaced_by: ai-learning-suite
+deprecated_date: 2026-08-22
+---
+
+> WARNING: This skill is deprecated as of 2026-08-22. Use `ai-learning-suite` instead. RAG exercises integrated into learning suite.
+
 # RAG 检索增强生成练习集
 
 > 10题4模块 RAG 实战练习，纯 numpy 可运行，248个测试全通过
