@@ -1,7 +1,13 @@
 ---
 name: skill-publisher
 description: 技能打包发布与全平台同步工具。覆盖从本地SKILL.md编写→zip打包→上传项目空间→Coze技能商店发布→GitHub推送→EvoMap发布的完整生命周期。当用户需要发布技能、打包技能、同步技能到多平台、更新技能版本、管理技能发布状态时使用此技能。
+deprecated: true
+replaced_by: multi-platform-publishing-engine
+deprecated_date: 2026-08-22
 ---
+
+> **DEPRECATED (2026-08-22)**: Use multi-platform-publishing-engine instead. 功能已整合入multi-platform-publishing-engine
+
 
 # Skill Publisher — 技能打包发布与全平台同步
 

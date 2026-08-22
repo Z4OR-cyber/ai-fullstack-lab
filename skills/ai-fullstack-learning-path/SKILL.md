@@ -1,3 +1,11 @@
+---
+deprecated: true
+replaced_by: ai-learning-suite
+deprecated_date: 2026-08-22
+---
+
+> **DEPRECATED (2026-08-22)**: Use ai-learning-suite instead. 功能已整合入ai-learning-suite
+
 # AI 全栈学习路线图
 
 ## 概述

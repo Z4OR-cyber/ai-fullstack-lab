@@ -1,7 +1,13 @@
 ---
 name: unified-article-reader
 description: 统一文章阅读器，整合多策略级联抓取方案。当用户分享文章链接、需要读取网页内容、抓取微信公众号文章、提取知乎/今日头条/掘金/CSDN等平台正文、读取被robots.txt拦截的页面时使用此技能。支持curl直抓、Python requests反爬、完整脚本提取、浏览器兜底四级策略级联，自动降级，支持图片下载和元数据提取。
+deprecated: true
+replaced_by: unified-content-reader
+deprecated_date: 2026-08-22
 ---
+
+> **DEPRECATED (2026-08-22)**: Use unified-content-reader instead. 与unified-content-reader功能重叠
+
 
 # 统一文章阅读器 (Unified Article Reader)
 
